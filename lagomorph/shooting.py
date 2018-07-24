@@ -27,7 +27,8 @@ def expmap(m0, T=1.0, Nsteps=100, phi0=None, phi=None):
 
     for i in range(Nsteps):
         m = ar.bigcoad(phi, m0)
-        K.apply(m)
+        K.inverse(m)
         composeHV(phi, m, dt=dt)
 
     return phi
+
