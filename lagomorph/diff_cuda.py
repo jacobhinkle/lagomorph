@@ -25,7 +25,19 @@ const Real ONE_OVER_2PI = 0.5f/PI;
 __inline__ __device__ Real safe_sqrt(Real x) {
     if (x < 0.) return 0.;
     return SQRT(x);
+
+
+__inline__ __device__ Real diff_central_unsafe(Real *x, int offset, int stride) {
+        return .5*(x[offset+stride] - x[offset-stride]);
+    }
+__inline__ __device__ Real diff_fwd_unsafe(Real *x, int offset, int stride) {
+        return x[offset+stride] - x[offset];
+    }
+__inline__ __device__ Real diff_rev_unsafe(Real *x, int offset, int stride) {
+        return x[offset] - x[offset-stride];
+    }
 }
+
 
 '''
 
@@ -50,4 +62,4 @@ class CudaFunc:
         f = mod.get_function(self.name)
         return f(*args, **kwargs)
 
-inv2 = CudaFunc("inv2")
+diff = CudaFunc("diff")
