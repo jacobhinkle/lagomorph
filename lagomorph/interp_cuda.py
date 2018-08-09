@@ -405,7 +405,7 @@ def getmod(precision='double'):
     elif precision == 'double':
         nvcc_flags.append('-DReal=double')
     else:
-        raise Exception('Unrecognized precision: {}'.format(precision))
+        raise Exception(f'Unrecognized precision: {precision}')
 
     return SourceModule(_cu, options=nvcc_flags, no_extern_c=1)
 

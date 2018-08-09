@@ -8,15 +8,8 @@ import numpy as np
 import math
 
 from . import interp_cuda as ic
+from .dtypes import dtype2precision
 from .elementwise import multiply_add
-
-def dtype2precision(dt):
-    if dt == np.float32:
-        return 'single'
-    elif dt == np.float64:
-        return 'double'
-    else:
-        raise Exception(f"Unknown dtype {dt}")
 
 def interp_image_kernel_bcastI(out, I, h):
     assert I.shape[0] == 1, "First dimension of I must be 1"
