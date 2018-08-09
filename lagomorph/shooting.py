@@ -5,7 +5,7 @@ from .metric import FluidMetric
 from .deform import identitylikedef, composeHV
 from .adjrep import AdjRep
 
-def expmap(m0, metric, T=1.0, Nsteps=2, phi=None):
+def expmap(m0, metric, T=1.0, Nsteps=10, phi=None):
     """
     Given an initial momentum (Lie algebra element), compute the exponential
     map.
@@ -19,17 +19,17 @@ def expmap(m0, metric, T=1.0, Nsteps=2, phi=None):
     adj = AdjRep(dim=d)
 
     dt = T/Nsteps
-    # initialization
-    m = m0.copy()
 
     for i in range(Nsteps):
         m = adj.Ad_star(phi, m0)
-        metric.sharp(m)
-        composeHV(phi, m, dt=dt)
+        #v = metric.sharp(m)
+        v = m
+        phi = composeHV(phi, v, dt=dt)
+        break
 
     return phi
 
-def Jacobi_field_backward(m0, metric, lamT, lam=None, mu=None, phi=None, T=1.0, Nsteps=2):
+def jacobi_field_backward(m0, metric, lamT, lam=None, mu=None, phi=None, T=1.0, Nsteps=2):
     """
     Integrate the geodesic regression adjoint equation (Jacobi field). You must
     provide the initial vector momentum for the geodesic, the metric kernel, and
@@ -51,3 +51,7 @@ def Jacobi_field_backward(m0, metric, lamT, lam=None, mu=None, phi=None, T=1.0, 
         d/dt Phi(t) = v \circ Phi(t)
         d/dt Phi^{-1}(t) = Phi^{-1}(t)\circ (x - dt v(t)) -- abuse of notation
     """
+    lam = lamT
+    mu = lam
+    print("WARNING: dummy Jacobi field")
+    return lam, mu

@@ -345,6 +345,56 @@ triLerp(const Real* img,
 }
 
 extern "C" {
+    __global__ void interp_image_2d(Real* out, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
+        int nxy = nx*ny;
+        int inx = j*nx + i;
+        int iny = nxy + j*nx + i;
+        int ino = inx;
+        for (int n=0; n < nn; ++n) {
+            Real hx = h[inx];
+            Real hy = h[iny];
+            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(I,
+                hx, hy,
+                nx, ny,
+                0.f);
+            inx += 2*nxy;
+            iny += 2*nxy;
+            ino += nxy;
+        }
+    }
+    __global__ void interp_vectorfield_2d(Real* out, Real* g, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
+        int nxy = nx*ny;
+        int inx = j*nx + i;
+        int iny = nxy + j*nx + i;
+        int ino = inx;
+        Real* gd = g;
+        for (int n=0; n < nn; ++n) {
+            Real hx = h[inx];
+            Real hy = h[iny];
+            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(gd,
+                hx, hy,
+                nx, ny,
+                0.f);
+            ino += nxy;
+            gd += nxy;
+            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(gd,
+                hx, hy,
+                nx, ny,
+                0.f);
+            ino += nxy;
+            gd += nxy;
+            inx += 2*nxy;
+            iny += 2*nxy;
+        }
+    }
     __global__ void interp_image_bcastI_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -419,4 +469,6 @@ class CudaFunc:
         f = self.funcs[precision]
         return f(*args, **kwargs)
 
+interp_image_2d = CudaFunc("interp_image_2d")
+interp_vectorfield_2d = CudaFunc("interp_vectorfield_2d")
 interp_image_bcastI_2d = CudaFunc("interp_image_bcastI_2d")
