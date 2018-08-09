@@ -1,11 +1,11 @@
 """
 Vector and scalar momentum shooting algorithms
 """
-from .kernel import FluidKernel
+from .metric import FluidMetric
 from .deform import identitylikedef, composeHV
 from .adjrep import AdjRep
 
-def expmap(m0, K, T=1.0, Nsteps=2, phi=None):
+def expmap(m0, metric, T=1.0, Nsteps=2, phi=None):
     """
     Given an initial momentum (Lie algebra element), compute the exponential
     map.
@@ -24,12 +24,12 @@ def expmap(m0, K, T=1.0, Nsteps=2, phi=None):
 
     for i in range(Nsteps):
         m = adj.Ad_star(phi, m0)
-        K.inverse(m)
+        metric.sharp(m)
         composeHV(phi, m, dt=dt)
 
     return phi
 
-def Jacobi_field_backward(m0, K, lamT, lam=None, mu=None, phi=None, T=1.0, Nsteps=2):
+def Jacobi_field_backward(m0, metric, lamT, lam=None, mu=None, phi=None, T=1.0, Nsteps=2):
     """
     Integrate the geodesic regression adjoint equation (Jacobi field). You must
     provide the initial vector momentum for the geodesic, the metric kernel, and
@@ -45,7 +45,7 @@ def Jacobi_field_backward(m0, K, lamT, lam=None, mu=None, phi=None, T=1.0, Nstep
     metrics (cf. Hinkle 2015, Appendix A):
 
         m(t) = Ad^*_{Phi^{-1}(t)}(m(0))
-        v(t) = K m(t)
+        v(t) = m(t)^sharp
         lambda(t) = Ad^*_{Phi(T to t)}(lambdaT)
         d/dt mu(t) = -sym^\dagger_{v(t)} mu(t) - lambda(t)
         d/dt Phi(t) = v \circ Phi(t)

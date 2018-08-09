@@ -1,12 +1,16 @@
 """
-Fluid and other LDDMM kernels
+Fluid and other LDDMM metrics
 """
-from . import kernel_cuda as kc
 import skcuda.fft
 from pycuda import gpuarray, cumath
 import numpy as np
 
-class FluidKernel(object):
+import math
+
+from . import metric_cuda
+from .dtypes import dtype2precision
+
+class FluidMetric(object):
     def __init__(self, shape, alpha, beta, gamma, precision='single'):
         """
         This kernel is the Green's function for:
@@ -51,19 +55,47 @@ class FluidKernel(object):
                 dtype=self.dtype)/N))
     def inverse_operator_fourier(self, Fm):
         # call the appropriate cuda kernel here
+        block = (32,32,1)
+        grid = (math.ceil(Fm.shape[2]/block[0]), math.ceil(Fm.shape[3]/block[1]), 1)
         if self.dim == 2:
-            kc.inv2(Fm, self.luts, precision=self.precision)
+            metric_cuda.inverse_operator_2d(Fm,
+                    self.luts['cos'][0], self.luts['sin'][0],
+                    self.luts['cos'][1], self.luts['sin'][1],
+                    block=block, grid=grid,
+                    precision=self.precision)
         elif self.dim == 3:
-            kc.inv3(Fm, self.luts, precision=self.precision)
-    def inverse(self, m, out=None):
+            raise NotImplementedError("not implemented yet")
+    def forward_operator_fourier(self, Fm):
+        # call the appropriate cuda kernel here
+        block = (32,32,1)
+        grid = (math.ceil(Fm.shape[2]/block[0]), math.ceil(Fm.shape[3]/block[1]), 1)
+        if self.dim == 2:
+            metric_cuda.forward_operator_2d(Fm,
+                    self.luts['cos'][0], self.luts['sin'][0],
+                    self.luts['cos'][1], self.luts['sin'][1],
+                    block=block, grid=grid,
+                    precision=self.precision)
+        elif self.dim == 3:
+            raise NotImplementedError("not implemented yet")
+    def sharp(self, m, out=None):
+        """
+        Raise indices, meaning convert a momentum (covector field) to a velocity
+        (vector field) by applying the Green's function which smooths the
+        momentum.
+        https://en.wikipedia.org/wiki/Musical_isomorphism
+        """
         if out is None:
             out = gpuarray.zeros_like(m)
         skcuda.fft.fft(m, self.Fv, self.fftplan)
-        #self.inverse_operator_fourier(self.Fv)
-        print("WARNING: using dummy inverse kernel")
+        self.inverse_operator_fourier(self.Fv)
         skcuda.fft.ifft(self.Fv, out, self.ifftplan)
         return out
-    def forward(self, m, out=None):
+    def flat(self, m, out=None):
+        """
+        Lower indices, meaning convert a vector field to a covector field
+        (a momentum)
+        https://en.wikipedia.org/wiki/Musical_isomorphism
+        """
         if out is None:
             out = gpuarray.zeros_like(m)
         skcuda.fft.fft(m, self.Fv, self.fftplan)

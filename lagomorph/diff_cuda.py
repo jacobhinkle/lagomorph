@@ -161,15 +161,32 @@ get_value_safe(const Real* arr, int nx, int ny, int i, int j, Real background=0.
 
 template<BackgroundStrategy backgroundStrategy>
 inline __device__
+Real
+diff_x(const Real* arr,
+       int nx, int ny,
+       int i, int j) {
+    return 0.5f*(get_value_safe<backgroundStrategy>(arr, nx, ny, i+1, j)
+               - get_value_safe<backgroundStrategy>(arr, nx, ny, i-1, j));
+}
+template<BackgroundStrategy backgroundStrategy>
+inline __device__
+Real
+diff_y(const Real* arr,
+       int nx, int ny,
+       int i, int j) {
+    return 0.5f*(get_value_safe<backgroundStrategy>(arr, nx, ny, i, j+1)
+               - get_value_safe<backgroundStrategy>(arr, nx, ny, i, j-1));
+}
+
+template<BackgroundStrategy backgroundStrategy>
+inline __device__
 void
 grad_point(Real& gx, Real& gy,
         const Real* arr,
         int nx, int ny,
         int i, int j) {
-    gx = 0.5f*(get_value_safe<backgroundStrategy>(arr, nx, ny, i+1, j)
-             - get_value_safe<backgroundStrategy>(arr, nx, ny, i-1, j));
-    gy = 0.5f*(get_value_safe<backgroundStrategy>(arr, nx, ny, i, j+1)
-             - get_value_safe<backgroundStrategy>(arr, nx, ny, i, j-1));
+    gx = diff_x<backgroundStrategy>(arr, nx, ny, i, j);
+    gy = diff_y<backgroundStrategy>(arr, nx, ny, i, j);
 }
 
 // Just a simple image gradient
@@ -190,6 +207,24 @@ gradient_kernel(Real* out, const Real* im,
         out[ino] = gy;
         ino += nxy;
         imn += nxy;
+    }
+}
+
+// Just a simple vector field divergence
+template<BackgroundStrategy backgroundStrategy>
+inline __device__
+void
+divergence_kernel(Real* out, const Real* v,
+        int nn, int nx, int ny, int i, int j) {
+    int nxy = nx*ny;
+    const Real* vn = v; // pointer to current channel
+    // index of current output point (first component. add nxy for second)
+    int ino = j*nx + i;
+    for (int n=0; n < nn; ++n) {
+        out[ino] = diff_x<backgroundStrategy>(vn, nx, ny, i, j);
+        vn += nxy;
+        out[ino] += diff_y<backgroundStrategy>(vn, nx, ny, i, j);
+        ino += nxy;
     }
 }
 
@@ -246,6 +281,14 @@ extern "C" {
         if (i >= nx || j >= ny) return;
         gradient_kernel<DEFAULT_BACKGROUND_STRATEGY>(out, im, nn, nx, ny, i, j);
     }
+    __global__ void divergence_2d(Real* out,
+            const Real* v,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
+        divergence_kernel<DEFAULT_BACKGROUND_STRATEGY>(out, v, nn, nx, ny, i, j);
+    }
     __global__ void jacobian_times_vectorfield_2d(Real* out,
             const Real* v, const Real* w,
             int nn, int nx, int ny) {
@@ -291,6 +334,7 @@ class CudaFunc:
         return f(*args, **kwargs)
 
 gradient_2d = CudaFunc("gradient_2d")
+divergence_2d = CudaFunc("divergence_2d")
 jacobian_times_vectorfield_2d = CudaFunc("jacobian_times_vectorfield_2d")
 jacobian_transpose_times_vectorfield_2d = \
         CudaFunc("jacobian_transpose_times_vectorfield_2d")

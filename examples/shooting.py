@@ -16,11 +16,11 @@ def shooting_example(alpha, beta, gamma, width = 256, num_iters=10):
 
     # initialize velocity field
     m0 = np.zeros(lm.imshape2defshape(source.shape), dtype=np.float32)
-    K = lm.FluidKernel(alpha=alpha, beta=beta, gamma=gamma, shape=m0.shape)
+    metric = lm.FluidMetric(alpha=alpha, beta=beta, gamma=gamma, shape=m0.shape)
 
     for it in range(num_iters):
         print(f"Iteration {it+1:2d} of {num_iters}")
-        h1 = lm.expmap(m0, K)
+        h1 = lm.expmap(m0, metric)
 
         # TODO apply to image
         I1 = lm.interp_image(source, h1)
