@@ -4,7 +4,7 @@ Adjoint representation for Diff(R^d)
 from pycuda import gpuarray
 
 from .diff import grad 
-from .interp import interp_def
+from .deform import interp_def
 
 class AdjRep(object):
     def __init__(self, dim):
@@ -56,3 +56,8 @@ class AdjRep(object):
             for dd in range(1, gphi.shape[1]):
                 out[:,d,:] += gphi[:,dd,...]
         return out
+    # dagger versions
+    def ad_dagger(self, x, y, K):
+        return K.inverse(self.ad_star(x, K.forward(y)))
+    def sym_dagger(self, x, y, K):
+        return self.ad_dagger(y, x, K) - self.ad(x, y)

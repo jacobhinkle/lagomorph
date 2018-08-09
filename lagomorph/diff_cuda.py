@@ -7,21 +7,6 @@ from pycuda import gpuarray
 _cu = '''
 #include <stdio.h>
 
-#if Real==float
-#define SQRT sqrtf
-#define ACOS acosf
-#define FOO 15.7
-#define FLOOR floorf
-#elif Real==double
-#define SQRT sqrt
-#define ACOS acos
-#define FLOOR floor
-#define FOO 7.5
-#endif
-
-#define PI  3.14159265358979323846
-const Real ONE_OVER_2PI = 0.5f/PI;
-
 __inline__ __device__ Real safe_sqrt(Real x) {
     if (x < 0.) return 0.;
     return SQRT(x);

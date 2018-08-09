@@ -1,4 +1,5 @@
-# vim: set syntax=cuda:
+# -*- mode: cuda -*-
+# vi: set syntax=cuda:
 from pycuda import gpuarray
 from pycuda.compiler import SourceModule, DEFAULT_NVCC_FLAGS
 import pycuda.autoinit
@@ -278,11 +279,12 @@ triLerp(const Real* img,
                           sizeX, sizeY, sizeZ);
     }else{
 	// unknown background strategy, don't allow compilation
-	STATIC_ASSERT(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
 		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
 		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
 		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
-		      backgroundStrategy== BACKGROUND_STRATEGY_VAL);
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
 	return 0.f;
     }
 
@@ -345,13 +347,53 @@ triLerp(const Real* img,
 extern "C" {
     __global__ void interp_image_bcastI_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
-        Real xi = biLerp<BACKGROUND_STRATEGY_CLAMP>(I,
-            0.5f, 0.5f,
-            nx, ny,
-            0.f);
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
+        int nxy = nx*ny;
+        int inx = j*nx + i;
+        int iny = nxy + j*nx + i;
+        int ino = inx;
+        for (int n=0; n < nn; ++n) {
+            Real hx = h[inx];
+            Real hy = h[iny];
+            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(I,
+                hx, hy,
+                nx, ny,
+                0.f);
+            inx += 2*nxy;
+            iny += 2*nxy;
+            ino += nxy;
+        }
     }
     __global__ void interp_image_bcastI_3d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny, int nz) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
+        int nxy = nx*ny;
+        int nxyz = nxy*nz;
+        int inn = 0;
+        for (int n=0; n < nn; ++n) {
+            int inx = inn +         j*nx + i;
+            int iny = inn +   nxy + j*nx + i;
+            int inz = inn + 2*nxy + j*nx + i;
+            int ino = inx;
+            for (int k=0; k < nz; ++k) {
+                Real hx = h[inx];
+                Real hy = h[iny];
+                Real hz = h[inz];
+                out[ino] = triLerp<BACKGROUND_STRATEGY_CLAMP>(I,
+                    hx, hy, hz,
+                    nx, ny, nz,
+                    0.f);
+                ino += nxy;
+                inx += 3*nxy;
+                iny += 3*nxy;
+                inz += 3*nxy;
+            }
+            inn += nxyz;
+        }
     }
 }
 '''
