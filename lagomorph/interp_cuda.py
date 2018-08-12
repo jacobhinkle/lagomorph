@@ -1,10 +1,7 @@
 # -*- mode: cuda -*-
 # vi: set syntax=cuda:
-from pycuda import gpuarray
-from pycuda.compiler import SourceModule, DEFAULT_NVCC_FLAGS
-import pycuda.autoinit
-
-_cu = '''
+from .cudamod import CudaModule
+mod = CudaModule('''
 #include <stdio.h>
 
 enum BackgroundStrategy { BACKGROUND_STRATEGY_PARTIAL_ID,
@@ -19,15 +16,15 @@ inline __device__ Real get_pixel_3d(int x, int y, int z,
                                     const Real* d_i,
                                     int sizeX, int sizeY, int sizeZ)
 {
-    int index = (z * sizeY + y) * sizeX + x;
+    int index = (x * sizeY + y) * sizeZ + z;
     return d_i[index];
 }
 
-inline __device__ Real get_pixel_2d(int x, int y,
+__device__ Real get_pixel_2d(int x, int y,
                                     const Real* d_i,
                                     int sizeX, int sizeY)
 {
-    int index =  y * sizeX + x;
+    int index =  x * sizeY + y;
     return d_i[index];
 }
 
@@ -351,13 +348,13 @@ extern "C" {
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         if (i >= nx || j >= ny) return;
         int nxy = nx*ny;
-        int inx = j*nx + i;
-        int iny = nxy + j*nx + i;
+        int inx = i*ny + j;
+        int iny = inx + nxy;
         int ino = inx;
         for (int n=0; n < nn; ++n) {
             Real hx = h[inx];
             Real hy = h[iny];
-            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(I,
+            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(I,
                 hx, hy,
                 nx, ny,
                 0.f);
@@ -372,20 +369,20 @@ extern "C" {
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         if (i >= nx || j >= ny) return;
         int nxy = nx*ny;
-        int inx = j*nx + i;
-        int iny = nxy + j*nx + i;
+        int inx = i*ny + j;
+        int iny = inx + nxy;
         int ino = inx;
         Real* gd = g;
         for (int n=0; n < nn; ++n) {
             Real hx = h[inx];
             Real hy = h[iny];
-            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(gd,
+            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(gd,
                 hx, hy,
                 nx, ny,
                 0.f);
             ino += nxy;
             gd += nxy;
-            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(gd,
+            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(gd,
                 hx, hy,
                 nx, ny,
                 0.f);
@@ -401,13 +398,13 @@ extern "C" {
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         if (i >= nx || j >= ny) return;
         int nxy = nx*ny;
-        int inx = j*nx + i;
-        int iny = nxy + j*nx + i;
+        int inx = i*ny + j;
+        int iny = nxy + i*ny + j;
         int ino = inx;
         for (int n=0; n < nn; ++n) {
             Real hx = h[inx];
             Real hy = h[iny];
-            out[ino] = biLerp<BACKGROUND_STRATEGY_CLAMP>(I,
+            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(I,
                 hx, hy,
                 nx, ny,
                 0.f);
@@ -425,15 +422,15 @@ extern "C" {
         int nxyz = nxy*nz;
         int inn = 0;
         for (int n=0; n < nn; ++n) {
-            int inx = inn +         j*nx + i;
-            int iny = inn +   nxy + j*nx + i;
-            int inz = inn + 2*nxy + j*nx + i;
+            int inx = inn +         i*ny + j;
+            int iny = inn +   nxy + i*ny + j;
+            int inz = inn + 2*nxy + i*ny + j;
             int ino = inx;
             for (int k=0; k < nz; ++k) {
                 Real hx = h[inx];
                 Real hy = h[iny];
                 Real hz = h[inz];
-                out[ino] = triLerp<BACKGROUND_STRATEGY_CLAMP>(I,
+                out[ino] = triLerp<DEFAULT_BACKGROUND_STRATEGY>(I,
                     hx, hy, hz,
                     nx, ny, nz,
                     0.f);
@@ -446,29 +443,8 @@ extern "C" {
         }
     }
 }
-'''
-
-def getmod(precision='double'):
-    nvcc_flags = DEFAULT_NVCC_FLAGS + ['-std=c++11']
-    if precision == 'single':
-        nvcc_flags.append('-DReal=float')
-    elif precision == 'double':
-        nvcc_flags.append('-DReal=double')
-    else:
-        raise Exception(f'Unrecognized precision: {precision}')
-
-    return SourceModule(_cu, options=nvcc_flags, no_extern_c=1)
-
-class CudaFunc:
-    def __init__(self, func_name):
-        self.name = func_name
-        self.funcs = {}
-    def __call__(self, *args, precision='double', **kwargs):
-        if not precision in self.funcs:
-            self.funcs[precision] = getmod(precision).get_function(self.name)
-        f = self.funcs[precision]
-        return f(*args, **kwargs)
-
-interp_image_2d = CudaFunc("interp_image_2d")
-interp_vectorfield_2d = CudaFunc("interp_vectorfield_2d")
-interp_image_bcastI_2d = CudaFunc("interp_image_bcastI_2d")
+''', extra_nvcc_flags=[
+        '-DDEFAULT_BACKGROUND_STRATEGY=BACKGROUND_STRATEGY_CLAMP'])
+interp_image_2d = mod.func("interp_image_2d")
+interp_vectorfield_2d = mod.func("interp_vectorfield_2d")
+interp_image_bcastI_2d = mod.func("interp_image_bcastI_2d")

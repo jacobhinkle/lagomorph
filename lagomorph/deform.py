@@ -2,14 +2,13 @@ import pycuda.driver as cuda
 import pycuda.autoinit
 from pycuda.compiler import SourceModule
 from pycuda import gpuarray
-from pycuda.elementwise import ElementwiseKernel
 
 import numpy as np
 import math
 
 from . import interp_cuda as ic
 from .dtypes import dtype2precision
-from .elementwise import multiply_add
+from .arithmetic import multiply_add
 
 def interp_image_kernel(out, I, h):
     assert I.ndim+1 == h.ndim, "Dimensions of I and h must match"
@@ -36,6 +35,7 @@ def interp_image_kernel(out, I, h):
 def interp_vectorfield_kernel(out, g, h):
     assert g.ndim == h.ndim, "Dimensions of g and h must match"
     assert out.dtype == g.dtype and g.dtype == h.dtype, "dtypes of all args must match"
+    assert out.flags.c_contiguous, "Output should be C contiguous"
     prec = dtype2precision(out.dtype)
     dim = g.ndim - 2
     if not isinstance(g, gpuarray.GPUArray):
@@ -44,7 +44,7 @@ def interp_vectorfield_kernel(out, g, h):
         h = gpuarray.to_gpu(np.asarray(h))
     if dim == 2:
         block = (32,32,1)
-        grid = (math.ceil(g.shape[1]/block[0]), math.ceil(g.shape[2]/block[1]), 1)
+        grid = (math.ceil(g.shape[2]/block[0]), math.ceil(g.shape[3]/block[1]), 1)
         ic.interp_vectorfield_2d(out, g, h,
                 np.int32(h.shape[0]),
                 np.int32(h.shape[2]),
@@ -113,7 +113,7 @@ def interp_def(g, h, out=None):
     assert g.shape[1] == dim, "g must have same number channels as dim"
     assert h.shape[1] == dim, "h must have same number channels as dim"
     if out is None:
-        out = gpuarray.empty(shape=g.shape, dtype=g.dtype, order='C')
+        out = gpuarray.empty_like(g, order='C')
     assert out.shape == g.shape, "Output must have same domain as g"
     interp_vectorfield_kernel(out, g, h)
     return out
@@ -138,7 +138,7 @@ def identity(defshape, dtype=np.float32):
         shd = [1]*len(defshape)
         shd[d+2] = ld
         ix[:,d,...] = np.arange(ld, dtype=dtype).reshape(shd)
-    return ix
+    return np.ascontiguousarray(ix)
 
 
 def identitylikeim(im):
@@ -164,7 +164,7 @@ def composeHV(h, v, dt=1.0, out=None):
     Given a deformation h, a velocity v, and a time step dt, compute h(x+dt*v(x))
     """
     if out is None:
-        out = gpuarray.zeros(shape=h.shape, dtype=h.dtype, order='C')
+        out = gpuarray.empty_like(h, order='C')
     xv = identitylikedef(h)
     multiply_add(v, dt, out=xv)
     # in place interp

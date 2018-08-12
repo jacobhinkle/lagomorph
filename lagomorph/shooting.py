@@ -1,35 +1,42 @@
 """
 Vector and scalar momentum shooting algorithms
 """
+from pycuda import gpuarray
+import pycuda.autoinit
+import numpy as np
+from .arithmetic import multiply_add
 from .metric import FluidMetric
 from .deform import identitylikedef, composeHV
 from .adjrep import AdjRep
 
-def expmap(m0, metric, T=1.0, Nsteps=10, phi=None):
+def expmap(m0, metric, T=1.0, Nsteps=10, phiinv=None):
     """
     Given an initial momentum (Lie algebra element), compute the exponential
     map.
+
+    What we return is actually only the inverse transformation phi^{-1}
     """
     d = m0.ndim-2
 
-    if phi is None:
-        phi = identitylikedef(m0)
+    if phiinv is None:
+        phiinv = identitylikedef(m0)
 
     # Helper class for adjoint representation
     adj = AdjRep(dim=d)
 
     dt = T/Nsteps
 
+    # preallocate vector fields
+    mv = gpuarray.empty_like(m0)
+
     for i in range(Nsteps):
-        m = adj.Ad_star(phi, m0)
-        #v = metric.sharp(m)
-        v = m
-        phi = composeHV(phi, v, dt=dt)
-        break
+        adj.Ad_star(phiinv, m0, out=mv)
+        metric.sharp(mv, out=mv)
+        phiinv = composeHV(phiinv, -mv, dt=dt)
 
-    return phi
+    return phiinv
 
-def jacobi_field_backward(m0, metric, lamT, lam=None, mu=None, phi=None, T=1.0, Nsteps=2):
+def jacobi_field_backward(m0, metric, phiinv, lamT, lam=None, mu=None, T=1.0, Nsteps=10):
     """
     Integrate the geodesic regression adjoint equation (Jacobi field). You must
     provide the initial vector momentum for the geodesic, the metric kernel, and
@@ -44,14 +51,39 @@ def jacobi_field_backward(m0, metric, lamT, lam=None, mu=None, phi=None, T=1.0, 
     Jacobi equation for actions of Riemannian Lie groups with right-invariant
     metrics (cf. Hinkle 2015, Appendix A):
 
+        L lambda(T) = grad Phi(T).I0 (Phi(T).I0 - I1)
         m(t) = Ad^*_{Phi^{-1}(t)}(m(0))
         v(t) = m(t)^sharp
-        lambda(t) = Ad^*_{Phi(T to t)}(lambdaT)
+        lambda(t) = Ad^dagger_{Phi(T to t)}(lambdaT) = K Ad^* Phi_Tt L lambdaTjj
         d/dt mu(t) = -sym^\dagger_{v(t)} mu(t) - lambda(t)
         d/dt Phi(t) = v \circ Phi(t)
         d/dt Phi^{-1}(t) = Phi^{-1}(t)\circ (x - dt v(t)) -- abuse of notation
     """
-    lam = lamT
-    mu = lam
-    print("WARNING: dummy Jacobi field")
+    d = m0.ndim-2
+
+    # g maps from 0 to t. h maps from T to t.
+    ginv = phiinv.copy()
+    hinv = identitylikedef(m0)
+    mu = gpuarray.empty_like(hinv)
+    mu.fill(0.0)
+
+    # Helper class for adjoint representation
+    adj = AdjRep(dim=d)
+
+    dt = T/Nsteps
+
+    # preallocate vector fields
+    mv = gpuarray.empty_like(m0)
+
+    for i in reversed(range(Nsteps)): 
+        adj.Ad_star(phiinv, m0, out=mv)
+        metric.sharp(mv, out=mv)
+        lam_flat = adj.Ad_star(hinv, lamT)
+        lam = metric.sharp(lam_flat)
+        dmu = adj.sym_dagger(mv, mu, metric)
+        dmu += lam
+        multiply_add(dmu, -dt, out=mu)
+        ginv = composeHV(ginv, mv, dt=dt)
+        hinv = composeHV(hinv, mv, dt=-dt)
+
     return lam, mu

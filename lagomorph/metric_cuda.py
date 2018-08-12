@@ -1,11 +1,8 @@
-# vim: set syntax=cuda:
+# -*- mode: cuda -*-
+# vi: set syntax=cuda:
 # Much of this was borrowed from PyCA's GFluidKernelFFTKernels.cu
-import pycuda.driver as cuda
-import pycuda.autoinit
-from pycuda.compiler import SourceModule, DEFAULT_NVCC_FLAGS
-from pycuda import gpuarray
-
-_cu = '''
+from .cudamod import CudaModule
+mod = CudaModule('''
 #include <cuComplex.h>
 #include <stdio.h>
 
@@ -156,14 +153,17 @@ fluid_kernel_2d(const int i, const int j,
     L11 = lambda - beta * cosY[j];
     L10 = beta * sinX[i] * sinY[j];
 
-    for (int n=0; n < nn ; ++n, ix+=planeSize, iy+=planeSize) {
+    for (int n=0; n < nn; ++n, ix+=planeSize, iy+=planeSize) {
       //
       // compute L (it is symmetric, only need lower triangular part)
       //
+      Complex Fmx=Fm[ix], Fmy=Fm[iy];
       if (inverseOp)
-        InverseOperatorMultiply(Fm[ix], Fm[iy], L00, L10, L11);
+        InverseOperatorMultiply(Fmx, Fmy, L00, L10, L11);
       else
-        OperatorMultiply(Fm[ix], Fm[iy], L00, L10, L11);
+        OperatorMultiply(Fmx, Fmy, L00, L10, L11);
+      Fm[ix] = Fmx;
+      Fm[iy] = Fmy;
 
       // set to zero outside cutoff (except if cutoff is 0)
       if (cutoffX == 0 && cutoffY == 0 && cutoffZ == 0)
@@ -222,27 +222,6 @@ extern "C" {
     }
 }
 
-'''
-
-def getmod(precision='single'):
-    if precision == 'single':
-        nvcc_flags = DEFAULT_NVCC_FLAGS + ['-DReal=float', '-DComplex=cuFloatComplex']
-    elif precision == 'double':
-        nvcc_flags = DEFAULT_NVCC_FLAGS + ['-DReal=double', '-DComplex=cuDoubleComplex']
-    else:
-        raise Exception('Unrecognized precision: {}'.format(precision))
-
-    return SourceModule(_cu, options=nvcc_flags, no_extern_c=True)
-
-class CudaFunc:
-    def __init__(self, func_name):
-        self.name = func_name
-        self.mods = {}
-    def __call__(self, *args, precision='double', **kwargs):
-        if not precision in self.mods:
-            self.mods[precision] = getmod(precision)
-        mod = self.mods[precision]
-        f = mod.get_function(self.name)
-        return f(*args, **kwargs)
-
-inverse_operator_2d = CudaFunc("inverse_operator_2d")
+''')
+forward_operator_2d = mod.func("forward_operator_2d")
+inverse_operator_2d = mod.func("inverse_operator_2d")

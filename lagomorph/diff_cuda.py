@@ -1,10 +1,6 @@
 # vim: set syntax=cuda:
-import pycuda.driver as cuda
-import pycuda.autoinit
-from pycuda.compiler import SourceModule, DEFAULT_NVCC_FLAGS
-from pycuda import gpuarray
-
-_cu = '''
+from .cudamod import CudaModule
+mod = CudaModule('''
 #include <stdio.h>
 
 enum BackgroundStrategy { BACKGROUND_STRATEGY_PARTIAL_ID,
@@ -19,7 +15,7 @@ inline __device__ Real get_pixel_3d(int x, int y, int z,
                                     const Real* d_i,
                                     int sizeX, int sizeY, int sizeZ)
 {
-    int index = (z * sizeY + y) * sizeX + x;
+    int index = (x * sizeY + y) * sizeX + z;
     return d_i[index];
 }
 
@@ -27,7 +23,7 @@ inline __device__ Real get_pixel_2d(int x, int y,
                                     const Real* d_i,
                                     int sizeX, int sizeY)
 {
-    int index =  y * sizeX + x;
+    int index =  x * sizeY + y;
     return d_i[index];
 }
 
@@ -49,90 +45,26 @@ inline __device__ void wrap(int& r, int b){
     }
 }
 
-inline __device__ void wrapBackground(int& floorX,
-                                      int& ceilX,
-                                      int sizeX) {
-    wrap(floorX, sizeX);
-    wrap(ceilX, sizeX);
-}
-inline __device__ void wrapBackground(int& floorX,int& floorY,
-                                      int& ceilX, int& ceilY,
-                                      int  sizeX, int  sizeY) {
-    wrapBackground(floorX, ceilX, sizeX);
-    wrapBackground(floorY, ceilY, sizeY);
-}
-inline __device__ void wrapBackground(int& floorX,int& floorY,int& floorZ,
-                                      int& ceilX, int& ceilY, int& ceilZ,
-                                      int  sizeX, int  sizeY, int  sizeZ) {
-    wrapBackground(floorX, ceilX, sizeX);
-    wrapBackground(floorY, ceilY, sizeY);
-    wrapBackground(floorZ, ceilZ, sizeZ);
-}
-
-// Clamp strategy
 inline __device__ void clamp(int& r, int b){
     if (r < 0) r = 0;
     else if (r >= b) r = b - 1;
-}
-
-inline __device__ void clampBackground(int& floorX,
-                                       int& ceilX,
-                                       int sizeX) {
-    if(floorX < 0) {
-      floorX = 0;
-      if(ceilX < 0) ceilX = 0;
-    }
-    if(ceilX >= sizeX) {
-      ceilX = sizeX-1;
-      if(floorX >= sizeX) floorX = sizeX-1;
-    }
-}
-inline __device__ void clampBackground(int& floorX, int& floorY,
-                                       int& ceilX, int& ceilY,
-                                       int  sizeX, int  sizeY) {
-    clampBackground(floorX, ceilX, sizeX);
-    clampBackground(floorY, ceilY, sizeY);
-}
-inline __device__ void clampBackground(int& floorX, int& floorY, int& floorZ,
-                                       int& ceilX, int& ceilY, int& ceilZ,
-                                       int  sizeX, int  sizeY, int  sizeZ) {
-    clampBackground(floorX, ceilX, sizeX);
-    clampBackground(floorY, ceilY, sizeY);
-    clampBackground(floorZ, ceilZ, sizeZ);
-}
-
-
-// Check if the point is completely inside the boundary
-inline __device__ bool isInside(int floorX, int floorY,
-                                int ceilX, int ceilY,
-                                int  sizeX, int  sizeY){
-
-    return (floorX >= 0 && ceilX < sizeX &&
-            floorY >= 0 && ceilY < sizeY);
-}
-inline __device__ bool isInside(int floorX,int floorY,int floorZ,
-                                int ceilX, int ceilY, int ceilZ,
-                                int  sizeX, int  sizeY, int  sizeZ){
-
-    return (floorX >= 0 && ceilX < sizeX &&
-            floorY >= 0 && ceilY < sizeY &&
-            floorZ >= 0 && ceilZ < sizeZ);
 }
 
 template<BackgroundStrategy backgroundStrategy>
 inline __device__
 Real
 get_value_safe(const Real* arr, int nx, int ny, int i, int j, Real background=0.0f) {
+    int ii=i, jj=j;
     // adjust the position of the sample point if required
     if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
-        wrap(i, nx);
-        wrap(j, ny);
-        return arr[j*nx + i];
+        wrap(ii, nx);
+        wrap(jj, ny);
+        return arr[ii*ny + jj];
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
-        clamp(i, nx);
-        clamp(j, ny);
-        return arr[j*nx + i];
+        clamp(ii, nx);
+        clamp(jj, ny);
+        return arr[ii*ny + jj];
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
 	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
@@ -143,8 +75,8 @@ get_value_safe(const Real* arr, int nx, int ny, int i, int j, Real background=0.
 	    background = 0.f;
 	}
 
-        if (i >= 0 && i < nx && j >= 0 && j < ny)
-            return arr[j*nx + i];
+        if (ii >= 0 && ii < nx && jj >= 0 && jj < ny)
+            return arr[ii*ny + jj];
         else
             return background;
     }else{
@@ -199,7 +131,7 @@ gradient_kernel(Real* out, const Real* im,
     int nxy = nx*ny;
     const Real* imn = im; // pointer to current image
     // index of current output point (first component. add nxy for second)
-    int ino = j*nx + i;
+    int ino = i*ny + j;
     for (int n=0; n < nn; ++n) {
         grad_point<backgroundStrategy>(gx, gy, imn, nx, ny, i, j);
         out[ino] = gx;
@@ -219,7 +151,7 @@ divergence_kernel(Real* out, const Real* v,
     int nxy = nx*ny;
     const Real* vn = v; // pointer to current channel
     // index of current output point (first component. add nxy for second)
-    int ino = j*nx + i;
+    int ino = i*ny + j;
     for (int n=0; n < nn; ++n) {
         out[ino] = diff_x<backgroundStrategy>(vn, nx, ny, i, j);
         vn += nxy;
@@ -241,7 +173,7 @@ jacobian_times_vectorfield_kernel(Real* out, const Real* v, const Real* w,
     int nxy = nx*ny;
     const Real* vn = v; // pointer to current vector field v
     // index of current output point (first component. add nxy for second)
-    int ino = j*nx + i;
+    int ino = i*ny + j;
     int inx = ino;
     int iny = nxy + ino;
     for (int n=0; n < nn; ++n) {
@@ -303,38 +235,15 @@ extern "C" {
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
         jacobian_times_vectorfield_kernel<DEFAULT_BACKGROUND_STRATEGY, 1>(
             out, v, w, nn, nx, ny, i, j);
     }
 }
-
-'''
-
-def getmod(precision='single', background_strategy='BACKGROUND_STRATEGY_CLAMP'):
-    nvcc_flags = DEFAULT_NVCC_FLAGS + ['-std=c++11',
-            f'-DDEFAULT_BACKGROUND_STRATEGY={background_strategy}']
-    if precision == 'single':
-        nvcc_flags.append('-DReal=float')
-    elif precision == 'double':
-        nvcc_flags.append('-DReal=double')
-    else:
-        raise Exception(f'Unrecognized precision: {precision}')
-
-    return SourceModule(_cu, options=nvcc_flags, no_extern_c=1)
-
-class CudaFunc:
-    def __init__(self, func_name):
-        self.name = func_name
-        self.mods = {}
-    def __call__(self, *args, precision='double', **kwargs):
-        if not precision in self.mods:
-            self.mods[precision] = getmod(precision)
-        mod = self.mods[precision]
-        f = mod.get_function(self.name)
-        return f(*args, **kwargs)
-
-gradient_2d = CudaFunc("gradient_2d")
-divergence_2d = CudaFunc("divergence_2d")
-jacobian_times_vectorfield_2d = CudaFunc("jacobian_times_vectorfield_2d")
+''', extra_nvcc_flags=[
+        '-DDEFAULT_BACKGROUND_STRATEGY=BACKGROUND_STRATEGY_CLAMP'])
+gradient_2d = mod.func("gradient_2d")
+divergence_2d = mod.func("divergence_2d")
+jacobian_times_vectorfield_2d = mod.func("jacobian_times_vectorfield_2d")
 jacobian_transpose_times_vectorfield_2d = \
-        CudaFunc("jacobian_transpose_times_vectorfield_2d")
+        mod.func("jacobian_transpose_times_vectorfield_2d")

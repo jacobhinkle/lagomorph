@@ -4,4 +4,4 @@ from .diff import *
 from .dtypes import *
 from .metric import *
 from .shooting import *
-from .elementwise import *
+from .arithmetic import *

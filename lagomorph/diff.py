@@ -4,7 +4,7 @@ import numpy as np
 
 import math
 
-from .deform import imshape2defshape
+from .deform import imshape2defshape, defshape2imshape
 from .dtypes import dtype2precision
 from . import diff_cuda
 

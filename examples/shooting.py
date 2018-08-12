@@ -20,10 +20,9 @@ def shooting_example(alpha, beta, gamma, width = 256, num_iters=10, step_size=.1
 
     for it in range(num_iters):
         print(f"Iteration {it+1:3d} of {num_iters} ", end='')
-        h1 = lm.expmap(m0, metric)
-
+        h = lm.expmap(m0, metric)
         # apply to image
-        I1 = lm.interp_image(source, h1)
+        I1 = lm.interp_image(source, h)
         # we'll need the gradient of the deformed image
         lamT = lm.gradient(I1)
         # compute L2 difference
@@ -31,10 +30,9 @@ def shooting_example(alpha, beta, gamma, width = 256, num_iters=10, step_size=.1
         sse = lm.sum_squares(I1)
         print(f"SSE = {sse}")
         # initialize lambda to difference times gradient of deformed image
-        # DIY expanddim so that we can multiply with broadcasting easily
-        lamT *= I1.reshape(tuple([I1.shape[0],1] + list(I1.shape[1:])))
+        lm.multiply_imvec(I1, lamT, out=lamT)
         # integrate adjoint equation
-        mu0, lam0 = lm.jacobi_field_backward(m0, metric, lamT)
+        mu0, lam0 = lm.jacobi_field_backward(m0, metric, h, lamT)
         # take gradient step for v0
         lm.multiply_add(mu0, -step_size, out=m0)
 

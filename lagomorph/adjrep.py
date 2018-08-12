@@ -2,6 +2,7 @@
 Adjoint representation for Diff(R^d)
 """
 from pycuda import gpuarray
+import numpy as np
 
 from .diff import gradient, jacobian_times_vectorfield, divergence
 from .deform import interp_def
@@ -43,9 +44,10 @@ class AdjRep(object):
         """
         out = jacobian_times_vectorfield(v, m, transpose=True) + jacobian_times_vectorfield(m, v)     
         dv = divergence(v)
-        out += m*dv.expand_dims(1)
+        for d in range(m.shape[1]):
+            out[:,d,...] += m[:,d,...]*dv
         return out
-    def Ad_star(self, phi, m):
+    def Ad_star(self, phi, m, out=None):
         """
         This is Ad^*(phi,m), the big coadjoint action of a deformation phi on a
         vector momentum m. The formula for this is
@@ -56,7 +58,8 @@ class AdjRep(object):
         """
         # First interpolate m
         mphi = interp_def(m, phi)
-        return jacobian_times_vectorfield(phi, mphi)
+        ret = jacobian_times_vectorfield(phi, mphi, out=out)
+        return ret
     # dagger versions of the above coadjoint operators
     # The dagger indicates that instead of a _dual_ action, the _adjoint_ action
     # under a metric. These are performed by flatting, applying to dual action,
