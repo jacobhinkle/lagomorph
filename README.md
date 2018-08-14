@@ -44,8 +44,7 @@ networks.
 
 # TODO List
 
-- Implement 2D and 3D interpolation
-- implement adjoint and coadjoint representation operators
-- Use skcuda.fft to create the kernel
 - Simple vector momentum shooting registration demo
+- Test suite
 - Vector momentum atlas building
+- Complete the 3D versions of above methods
