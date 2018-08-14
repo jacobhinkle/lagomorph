@@ -19,6 +19,9 @@ def gridplot(u, Nx=None, Ny=None, displacement=True, color='black', **kwargs):
     if displacement: # add identity
         h[0,0,...] += np.arange(Nx).reshape((Nx,1))
         h[0,1,...] += np.arange(Ny).reshape((1,Ny))
+    # put back into original index space
+    h[:,0,...] *= float(u.shape[2]//Nx)
+    h[:,1,...] *= float(u.shape[3]//Ny)
     # create a meshgrid of locations
     for i in range(h.shape[2]):
         plt.plot(h[0,1,i,:], h[0,0,i,:], color=color, **kwargs)
