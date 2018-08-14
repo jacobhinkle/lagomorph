@@ -5,73 +5,69 @@ from pycuda import gpuarray
 import numpy as np
 
 from .diff import gradient, jacobian_times_vectorfield, divergence
-from .deform import interp_def
+from .deform import interp_vec
 
-class AdjRep(object):
-    def __init__(self, dim):
-        """
-        Args:
-            dim: integer, either 2 or 3
-        """
-        self.dim = dim
-    def ad(self, v, w):
-        """
-        This is ad(v,w), the adjoint action of a velocity v on a
-        velocity w.
+def ad(v, w):
+    """
+    This is ad(v,w), the adjoint action of a velocity v on a
+    velocity w.
 
-            ad(v,w) = -[v,w] = Dv w - Dw v
-        """
-        return jacobian_times_vectorfield(v,w) - jacobian_times_vectorfield(w,v)
-    def Ad(self, phi, v):
-        """
-        This is Ad(phi,v), the big adjoint action of a deformation phi on a
-        velocity w.
+        ad(v,w) = -[v,w] = Dv w - Dw v
+    """
+    return jacobian_times_vectorfield(v,w) - jacobian_times_vectorfield(w,v)
+def Ad(phi, v):
+    """
+    This is Ad(phi,v), the big adjoint action of a deformation phi on a
+    velocity w.
 
-            Ad(phi,v) = (Dphi \circ phi^{-1}) v\circ phi^{-1}
+        Ad(phi,v) = (Dphi \circ phi^{-1}) v\circ phi^{-1}
 
-        This is a tricky computation, is not commonly needed in practice and
-        will not be implemented until needed.
-        """
-        raise NotImplementedError("not implemented yet")
-    def ad_star(self, v, m):
-        """
-        This is ad^*(v,m), the coadjoint action of a velocity v on a
-        vector momentum m.
+    This is a tricky computation, is not commonly needed in practice and
+    will not be implemented until needed.
 
-            ad^*(v, m) = (Dv)^T m + Dm v + m div v
+    Given phi^{-1}, Ad(phi, v) can be computed by first multiplying v by
+    Dphi^{-1} then splatting the components of the resulting vector field.
+    """
+    raise NotImplementedError("not implemented yet")
+def ad_star(v, m):
+    """
+    This is ad^*(v,m), the coadjoint action of a velocity v on a
+    vector momentum m.
 
-        where div denotes the divergence of a vector field
-        """
-        out = jacobian_times_vectorfield(v, m, transpose=True) + jacobian_times_vectorfield(m, v)     
-        dv = divergence(v)
-        for d in range(m.shape[1]):
-            out[:,d,...] += m[:,d,...]*dv
-        return out
-    def Ad_star(self, phi, m, out=None):
-        """
-        This is Ad^*(phi,m), the big coadjoint action of a deformation phi on a
-        vector momentum m. The formula for this is
+        ad^*(v, m) = (Dv)^T m + Dm v + m div v
 
-            Ad^*(phi,m)(x) = (D phi(x)) m(phi(x))
+    where div denotes the divergence of a vector field
+    """
+    out = jacobian_times_vectorfield(v, m, transpose=True) + jacobian_times_vectorfield(m, v)     
+    dv = divergence(v)
+    for d in range(m.shape[1]):
+        out[:,d,...] += m[:,d,...]*dv
+    return out
+def Ad_star(phi, m, out=None):
+    """
+    This is Ad^*(phi,m), the big coadjoint action of a deformation phi on a
+    vector momentum m. The formula for this is
 
-        where D denotes the Jacobian matrix.
-        """
-        # First interpolate m
-        mphi = interp_def(m, phi)
-        ret = jacobian_times_vectorfield(phi, mphi, out=out)
-        return ret
-    # dagger versions of the above coadjoint operators
-    # The dagger indicates that instead of a _dual_ action, the _adjoint_ action
-    # under a metric. These are performed by flatting, applying to dual action,
-    # then sharping.
-    def ad_dagger(self, x, y, metric):
-        return metric.sharp(self.ad_star(x, metric.flat(y)))
-    def Ad_dagger(self, phi, y, metric):
-        return metric.sharp(self.Ad_star(phi, metric.flat(y)))
-    # The sym operator is a negative symmetrized ad_dagger, and is important for
-    # computing reduced Jacobi fields.
-    # cf. Bullo 1995 or Hinkle 2015 (PhD thesis)
-    def sym(self, x, y, metric):
-        return -(self.ad_dagger(x, y, metric) + self.ad_dagger(y, x, metric))
-    def sym_dagger(self, x, y, metric):
-        return self.ad_dagger(y, x, metric) - self.ad(x, y)
+        Ad^*(phi,m)(x) = (D phi(x)) m(phi(x))
+
+    where D denotes the Jacobian matrix.
+    """
+    # First interpolate m
+    mphi = interp_vec(m, phi)
+    ret = jacobian_times_vectorfield(phi, mphi, out=out)
+    return ret
+# dagger versions of the above coadjoint operators
+# The dagger indicates that instead of a _dual_ action, the _adjoint_ action
+# under a metric. These are performed by flatting, applying to dual action,
+# then sharping.
+def ad_dagger(x, y, metric):
+    return metric.sharp(ad_star(x, metric.flat(y)))
+def Ad_dagger(phi, y, metric):
+    return metric.sharp(Ad_star(phi, metric.flat(y)))
+# The sym operator is a negative symmetrized ad_dagger, and is important for
+# computing reduced Jacobi fields.
+# cf. Bullo 1995 or Hinkle 2015 (PhD thesis)
+def sym(x, y, metric):
+    return -(ad_dagger(x, y, metric) + ad_dagger(y, x, metric))
+def sym_dagger(x, y, metric):
+    return ad_dagger(y, x, metric) - ad(x, y)

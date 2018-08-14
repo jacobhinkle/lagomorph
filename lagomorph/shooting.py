@@ -7,7 +7,7 @@ import numpy as np
 from .arithmetic import multiply_add
 from .metric import FluidMetric
 from .deform import identitylikedef, composeHV
-from .adjrep import AdjRep
+from . import adjrep
 
 def expmap(m0, metric, T=1.0, Nsteps=10, phiinv=None):
     """
@@ -21,18 +21,15 @@ def expmap(m0, metric, T=1.0, Nsteps=10, phiinv=None):
     if phiinv is None:
         phiinv = identitylikedef(m0)
 
-    # Helper class for adjoint representation
-    adj = AdjRep(dim=d)
-
     dt = T/Nsteps
 
     # preallocate vector fields
     mv = gpuarray.empty_like(m0)
 
     for i in range(Nsteps):
-        adj.Ad_star(phiinv, m0, out=mv)
+        adjrep.Ad_star(phiinv, m0, out=mv)
         metric.sharp(mv, out=mv)
-        phiinv = composeHV(phiinv, -mv, dt=dt)
+        phiinv = composeHV(phiinv, mv, dt=-dt)
 
     return phiinv
 
@@ -54,7 +51,7 @@ def jacobi_field_backward(m0, metric, phiinv, lamT, lam=None, mu=None, T=1.0, Ns
         L lambda(T) = grad Phi(T).I0 (Phi(T).I0 - I1)
         m(t) = Ad^*_{Phi^{-1}(t)}(m(0))
         v(t) = m(t)^sharp
-        lambda(t) = Ad^dagger_{Phi(T to t)}(lambdaT) = K Ad^* Phi_Tt L lambdaTjj
+        lambda(t) = Ad^dagger_{Phi(T to t)}(lambdaT) = K Ad^* Phi_Tt L lambdaT
         d/dt mu(t) = -sym^\dagger_{v(t)} mu(t) - lambda(t)
         d/dt Phi(t) = v \circ Phi(t)
         d/dt Phi^{-1}(t) = Phi^{-1}(t)\circ (x - dt v(t)) -- abuse of notation
@@ -64,11 +61,7 @@ def jacobi_field_backward(m0, metric, phiinv, lamT, lam=None, mu=None, T=1.0, Ns
     # g maps from 0 to t. h maps from T to t.
     ginv = phiinv.copy()
     hinv = identitylikedef(m0)
-    mu = gpuarray.empty_like(hinv)
-    mu.fill(0.0)
-
-    # Helper class for adjoint representation
-    adj = AdjRep(dim=d)
+    mu = gpuarray.zeros_like(hinv)
 
     dt = T/Nsteps
 
@@ -76,13 +69,13 @@ def jacobi_field_backward(m0, metric, phiinv, lamT, lam=None, mu=None, T=1.0, Ns
     mv = gpuarray.empty_like(m0)
 
     for i in reversed(range(Nsteps)): 
-        adj.Ad_star(phiinv, m0, out=mv)
+        adjrep.Ad_star(phiinv, m0, out=mv)
         metric.sharp(mv, out=mv)
-        lam_flat = adj.Ad_star(hinv, lamT)
+        lam_flat = adjrep.Ad_star(hinv, lamT)
         lam = metric.sharp(lam_flat)
-        dmu = adj.sym_dagger(mv, mu, metric)
+        dmu = adjrep.sym_dagger(mv, mu, metric)
         dmu += lam
-        multiply_add(dmu, -dt, out=mu)
+        multiply_add(dmu, dt, out=mu)
         ginv = composeHV(ginv, mv, dt=dt)
         hinv = composeHV(hinv, mv, dt=-dt)
 

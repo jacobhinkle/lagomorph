@@ -12,7 +12,7 @@ def sum_squares(x):
     """Just compute the sum of squares of a gpuarray"""
     krnl = ReductionKernel(np.float64, neutral="0",
                 reduce_expr="a+b", map_expr="x[i]*x[i]",
-                arguments="float *x")
+                arguments="const float *x")
     return krnl(x).get()
 
 def multiply_add(x, alpha, out=None):
@@ -21,7 +21,7 @@ def multiply_add(x, alpha, out=None):
         out.fill(0)
     xtype = dtype2ctype(x.dtype)
     ma = ElementwiseKernel(
-            f"{xtype} *out, {xtype} *x, {xtype} alpha",
+            f"{xtype} *out, const {xtype} *x, {xtype} alpha",
             "out[i] += alpha*x[i]",
             "multiply_add")
     ma(out, x, x.dtype.type(alpha))
@@ -33,7 +33,7 @@ def multiply(x, y, out=None):
     assert x.dtype == y.dtype, "dtypes must be equal"
     xtype = dtype2ctype(x.dtype)
     m = ElementwiseKernel(
-            f"{xtype} *out, {xtype} *x, {xtype} *y",
+            f"{xtype} *out, const {xtype} *x, const {xtype} *y",
             "out[i] = x[i]*y[i]",
             "multiply")
     if out is None:

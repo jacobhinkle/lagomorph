@@ -106,7 +106,7 @@ def interp_image(I, h, out=None):
         interp_image_kernel(out, I, h)
     return out
 
-def interp_def(g, h, out=None):
+def interp_vec(g, h, out=None):
     """Given g and h, compute $g \circ h$ by interpolating each dimension separately"""
     dim = g.ndim - 2
     assert g.ndim == h.ndim, "Dimension of I must be one less that of h"
@@ -168,5 +168,5 @@ def composeHV(h, v, dt=1.0, out=None):
     xv = identitylikedef(h)
     multiply_add(v, dt, out=xv)
     # in place interp
-    interp_def(h, xv, out=out)
+    interp_vec(h, xv, out=out)
     return out

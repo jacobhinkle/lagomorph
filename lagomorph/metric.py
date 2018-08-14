@@ -24,6 +24,15 @@ class FluidMetric(object):
         The shape argument is the size of a velocity or momentum, in NCWHD order
         """
         self.shape = shape
+        self.complexshape = list(shape)
+        self.complexshape[-1] = self.complexshape[-1]//2+1
+        self.complexshape = tuple(self.complexshape)
+        self.alpha = float(alpha)
+        self.beta = float(beta)
+        self.gamma = float(gamma)
+        if gamma <= 4*alpha + 2*beta and False:
+            print("WARNING: ill-conditioned kernel. gamma <= "
+                f"4*alpha + 2*beta = {4*alpha + 2*beta}")
         self.dim = len(shape)-2
         if self.dim != 2 and self.dim != 3:
             raise Exception(f"Invalid dimension: {self.dim}")
@@ -37,29 +46,29 @@ class FluidMetric(object):
         else:
             raise Exception(f"Unsupported precision: {precision}")
         # initialize memory for out of place fft
-        self.Fv = gpuarray.empty(shape=shape, dtype=self.complex_dtype, order='C')
+        self.Fv = gpuarray.empty(shape=self.complexshape, dtype=self.complex_dtype, order='C')
         # initialize lookup tables and send them up to the gpu
         self.initialize_luts()
         # fft plan
-        self.fftplan = skcuda.fft.Plan(shape[2:], self.dtype, self.complex_dtype, batch=shape[0]*shape[1])
-        self.ifftplan = skcuda.fft.Plan(shape[2:], self.complex_dtype, self.dtype, batch=shape[0]*shape[1])
+        self.fftplan = skcuda.fft.Plan(self.shape[2:], self.dtype, self.complex_dtype, batch=shape[0]*shape[1])
+        self.ifftplan = skcuda.fft.Plan(self.shape[2:], self.complex_dtype, self.dtype, batch=shape[0]*shape[1])
     def initialize_luts(self):
         """
         Fill out lookup tables used in Fourier kernel. This amounts to just
         precomputing the sine and cosine (period N_d) for each dimension.
         """
         self.luts = {'cos': [], 'sin': []}
-        for N in self.shape[2:]:
+        for (Nf,N) in zip(self.complexshape[2:], self.shape[2:]):
             self.luts['cos'].append(gpuarray.to_gpu(
-                np.require(np.cos(2.*np.pi*np.arange(N, dtype=self.dtype)/N),
-                    requirements='WOC')))
+                np.require((1.-np.cos(2*np.pi*np.arange(N, dtype=self.dtype)/N)),
+                    requirements='C')))
             self.luts['sin'].append(gpuarray.to_gpu(
                 np.require(np.sin(2.*np.pi*np.arange(N, dtype=self.dtype)/N),
-                    requirements='WOC')))
+                    requirements='C')))
     def operator_fourier(self, Fm, inverse=False):
         # call the appropriate cuda kernel here
         block = (32,32,1)
-        grid = (math.ceil(Fm.shape[2]/block[0]), math.ceil(Fm.shape[3]/block[1]), 1)
+        grid = (math.ceil(self.complexshape[2]/block[0]), math.ceil(self.complexshape[3]/block[1]), 1)
         if self.dim == 2:
             if inverse:
                 f = metric_cuda.inverse_operator_2d
@@ -68,8 +77,9 @@ class FluidMetric(object):
             f(Fm,
                 self.luts['cos'][0], self.luts['sin'][0],
                 self.luts['cos'][1], self.luts['sin'][1],
-                Fm.shape[0], Fm.shape[2], Fm.shape[3],
-                0, 0, 0,
+                self.alpha, self.beta, self.gamma,
+                self.complexshape[0], self.complexshape[2], self.complexshape[3],
+                0, 0,
                 block=block, grid=grid,
                 precision=self.precision)
         elif self.dim == 3:
@@ -82,19 +92,20 @@ class FluidMetric(object):
         https://en.wikipedia.org/wiki/Musical_isomorphism
         """
         assert m.flags.c_contiguous, "Momentum array must be contiguous"
+        assert self.Fv.flags.c_contiguous, "Fv must be contiguous"
         if out is None:
-            out = gpuarray.empty_like(m, order='C')
-        origshape = m.shape
-        fftshape = (m.shape[0]*m.shape[1], m.shape[2], m.shape[3])
-        m = m.reshape(fftshape)
-        self.Fv = self.Fv.reshape(fftshape)
-        skcuda.fft.fft(m, self.Fv, self.fftplan)
-        self.Fv = self.Fv.reshape(origshape)
+            out = gpuarray.empty_like(m, dtype=self.dtype, order='C')
+        #origshape = m.shape
+        #fftshape = (m.shape[0]*m.shape[1], m.shape[2], m.shape[3])
+        #m = m.reshape(fftshape)
+        #self.Fv = self.Fv.reshape(fftshape)
+        skcuda.fft.fft(m.astype(self.dtype), self.Fv, self.fftplan, scale=True)
+        #self.Fv = self.Fv.reshape(origshape)
         self.operator_fourier(self.Fv, inverse=True)
-        self.Fv = self.Fv.reshape(fftshape)
-        skcuda.fft.ifft(self.Fv, out, self.ifftplan, scale=True)
-        m = m.reshape(origshape)
-        self.Fv = self.Fv.reshape(origshape)
+        #self.Fv = self.Fv.reshape(fftshape)
+        skcuda.fft.ifft(self.Fv, out, self.ifftplan)
+        #m = m.reshape(origshape)
+        #self.Fv = self.Fv.reshape(origshape)
         return out
     def flat(self, m, out=None):
         """
@@ -104,8 +115,8 @@ class FluidMetric(object):
         """
         #raise Exception("Flat not working")
         if out is None:
-            out = gpuarray.empty_like(m, order='C')
-        skcuda.fft.fft(m, self.Fv, self.fftplan)
+            out = gpuarray.empty_like(m, dtype=self.dtype, order='C')
+        skcuda.fft.fft(m.astype(self.dtype), self.Fv, self.fftplan)
         self.operator_fourier(self.Fv, inverse=False)
         skcuda.fft.ifft(self.Fv, out, self.ifftplan, scale=True)
         return out

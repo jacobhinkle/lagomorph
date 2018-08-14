@@ -40,8 +40,8 @@ InverseOperatorMultiply(Complex& bX,
                         Complex& bY,
                         Real L00,
                         Real L10, Real L11) {
-    Real G00;
-    Real G10, G11;
+    Real ooG00;
+    Real G10, ooG11;
     Real y0, y1;
     //
     // Given that A is pos-def symetric matrix, solve Ax=b by finding
@@ -57,24 +57,23 @@ InverseOperatorMultiply(Complex& bX,
     // [ G(1,1)   0      0    ]   [ G(1,1) G(2,1) G(3,1) ]
     // [ G(2,1) G(2,2)   0    ] * [   0    G(2,2) G(3,2) ] = Amatrix
     // [ G(3,1) G(3,2) G(3,3) ]   [   0      0    G(3,3) ]
+    Real bRealX = bX.x;
+    Real bRealY = bY.x;
 
-    Real bRealX = REALPART(bX);
-    Real bRealY = REALPART(bY);
+    Real bImagX = bX.y;
+    Real bImagY = bY.y;
 
-    Real bImagX = IMAGPART(bX);
-    Real bImagY = IMAGPART(bY);
+    Real& vRealX = bX.x;
+    Real& vRealY = bY.x;
 
-    Real vRealX = bRealX;
-    Real vRealY = bRealY;
+    Real& vImagX = bX.y;
+    Real& vImagY = bY.y;
 
-    Real vImagX = bImagX;
-    Real vImagY = bImagY;
+    ooG00 = 1./safe_sqrt(L00);
+    G10 = L10 * ooG00;
 
-    G00 = safe_sqrt(L00);
-    G10 = L10 / G00;
-
-    G11 = L11 - G10 * G10;
-    G11 = safe_sqrt(G11);
+    ooG11 = L11 - G10 * G10;
+    ooG11 = 1./safe_sqrt(ooG11);
 
     // back-solve Gy=b to get a temporary vector y
     // back-solve G'x=y to get answer in x
@@ -87,21 +86,15 @@ InverseOperatorMultiply(Complex& bX,
     // [ G(1,1) G(2,1) G(3,1) ]   [ x(1) ] = y(1)
     // [   0    G(2,2) G(3,2) ] * [ x(2) ] = y(2)
     // [   0      0    G(3,3) ]   [ x(3) ] = y(3)
-    y0 = bRealX / G00;
-    y1 = (bRealY - G10*y0) / G11;
+    y0 = bRealX * ooG00;
+    y1 = (bRealY - G10*y0) * ooG11;
+    vRealY = y1 * ooG11;
+    vRealX = (y0 - G10*vRealY) * ooG00;
 
-    vRealY = y1 / G11;
-    vRealX = (y0 - G10*vRealY) / G00;
-
-    y0 = bImagX / G00;
-    y1 = (bImagY - G10*y0) / G11;
-
-    vImagY = y1 / G11;
-    vImagX = (y0 - G10*vImagY) / G00;
-
-    // set outputs
-    bX = MAKECOMPLEX(vRealX, vImagX);
-    bY = MAKECOMPLEX(vRealY, vImagY);
+    y0 = bImagX * ooG00;
+    y1 = (bImagY - G10*y0) * ooG11;
+    vImagY = y1 * ooG11;
+    vImagX = (y0 - G10*vImagY) * ooG00;
 }
 
 __device__
@@ -110,50 +103,50 @@ OperatorMultiply(Complex& bX,
                  Complex& bY,
                  Real L00,
                  Real L10, Real L11) {
-    Real bRealX = REALPART(bX);
-    Real bRealY = REALPART(bY);
+    Real bRealX = bX.x;
+    Real bRealY = bY.x;
+    Real bImagX = bX.y;
+    Real bImagY = bY.y;
 
-    Real bImagX = IMAGPART(bX);
-    Real bImagY = IMAGPART(bY);
+    Real& vRealX = bX.x;
+    Real& vRealY = bY.x;
+    Real& vImagX = bX.y;
+    Real& vImagY = bY.y;
 
-    Real vRealX = L00*bRealX + L10*bRealY;
-    Real vRealY = L10*bRealX + L11*bRealY;
-
-    Real vImagX = L00*bImagX + L10*bImagY;
-    Real vImagY = L10*bImagX + L11*bImagY;
-
-    bX = MAKECOMPLEX(vRealX, vImagX);
-    bY = MAKECOMPLEX(vRealY, vImagY);
+    vRealX = L00*bRealX + L10*bRealY;
+    vRealY = L10*bRealX + L11*bRealY;
+    vImagX = L00*bImagX + L10*bImagY;
+    vImagY = L10*bImagX + L11*bImagY;
 }
 
 template<bool inverseOp>
 inline __device__
 void
-fluid_kernel_2d(const int i, const int j,
+fluid_kernel_2d(int i, int j,
         Complex* Fm,
         const Real* cosX, const Real* sinX,
         const Real* cosY, const Real* sinY,
-        const Real alpha, const Real beta, const Real gamma,
-        const int nn, const int nx, const int ny,
-        const int cutoffX, const int cutoffY, const int cutoffZ) {
-    Real wx = cosX[i];
-    Real wy = cosY[j];
-    Real lambda;
+        Real alpha, Real beta, Real gamma,
+        int nn, int nx, int ny,
+        int cutoffX, int cutoffY) {
+    if (i >= nx || j >= ny) return;
+    const Real wx = cosX[i];
+    const Real wy = cosY[j];
     Real L00;
     Real L10, L11;
 
-    const int planeSize = nx * ny;
-    int ix     = i + j * nx;
-    int iy     = i + j * nx + planeSize;
+    const int nxy = nx*ny;
+    int ix     = j + i * ny;
+    int iy     = j + i * ny + nxy;
 
     // alpha and gamma parts are diagonal in Fourier
-    lambda = -alpha * (wx + wy) + gamma;
+    const Real lambda = gamma + alpha * (wx + wy);
 
-    L00 = lambda - beta * cosX[i];
-    L11 = lambda - beta * cosY[j];
-    L10 = beta * sinX[i] * sinY[j];
+    L00 = lambda + beta * cosX[i];
+    L11 = lambda + beta * cosY[j];
+    L10 = -beta * sinX[i] * sinY[j];
 
-    for (int n=0; n < nn; ++n, ix+=planeSize, iy+=planeSize) {
+    for (int n=0; n < nn; ++n, ix+=2*nxy, iy+=2*nxy) {
       //
       // compute L (it is symmetric, only need lower triangular part)
       //
@@ -162,11 +155,13 @@ fluid_kernel_2d(const int i, const int j,
         InverseOperatorMultiply(Fmx, Fmy, L00, L10, L11);
       else
         OperatorMultiply(Fmx, Fmy, L00, L10, L11);
-      Fm[ix] = Fmx;
-      Fm[iy] = Fmy;
+      Fm[ix].x = Fmx.x;
+      Fm[ix].y = Fmx.y;
+      Fm[iy].x = Fmy.x;
+      Fm[iy].y = Fmy.y;
 
       // set to zero outside cutoff (except if cutoff is 0)
-      if (cutoffX == 0 && cutoffY == 0 && cutoffZ == 0)
+      if (cutoffX == 0 && cutoffY == 0)
         continue;
 
       Real weight = 1.0f;
@@ -174,7 +169,7 @@ fluid_kernel_2d(const int i, const int j,
       // use fft coordinates, and rescale to S^1
       Real xF, yF, rF = 0.0f;
       if (cutoffX > 0)
-        xF = static_cast<Real>(i)/static_cast<Real>(cutoffX);
+        xF = static_cast<Real>(min(i, nx-1-i))/static_cast<Real>(cutoffX);
       if (cutoffY > 0)
         yF = static_cast<Real>(min(j, ny-1-j))/static_cast<Real>(cutoffY);
 
@@ -201,24 +196,22 @@ extern "C" {
             const Real* cosY, const Real* sinY,
             const Real alpha, const Real beta, const Real gamma,
             const int nn, const int nx, const int ny,
-            const int cutoffX, const int cutoffY, const int cutoffZ) {
+            const int cutoffX, const int cutoffY) {
         const int i = blockDim.x * blockIdx.x + threadIdx.x;
         const int j = blockDim.y * blockIdx.y + threadIdx.y;
-        if (i >= nx || j >= ny) return;
         fluid_kernel_2d<false>(i, j, Fm, cosX, sinX, cosY, sinY,
-            alpha, beta, gamma, nn, nx, ny, cutoffX, cutoffY, cutoffZ);
+            alpha, beta, gamma, nn, nx, ny, cutoffX, cutoffY);
     }
     __global__ void inverse_operator_2d(Complex* Fm,
             const Real* cosX, const Real* sinX,
             const Real* cosY, const Real* sinY,
             const Real alpha, const Real beta, const Real gamma,
             const int nn, const int nx, const int ny,
-            const int cutoffX, const int cutoffY, const int cutoffZ) {
+            const int cutoffX, const int cutoffY) {
         const int i = blockDim.x * blockIdx.x + threadIdx.x;
         const int j = blockDim.y * blockIdx.y + threadIdx.y;
-        if (i >= nx || j >= ny) return;
         fluid_kernel_2d<true>(i, j, Fm, cosX, sinX, cosY, sinY,
-            alpha, beta, gamma, nn, nx, ny, cutoffX, cutoffY, cutoffZ);
+            alpha, beta, gamma, nn, nx, ny, cutoffX, cutoffY);
     }
 }
 

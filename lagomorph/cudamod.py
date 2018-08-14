@@ -21,6 +21,11 @@ class CudaFunc:
         for (i,a) in enumerate(args):
             if isinstance(a, int):
                 args[i] = np.int32(a)
+            elif isinstance(a, float):
+                if precision == 'single':
+                    args[i] = np.float32(a)
+                else:
+                    args[i] = np.float64(a)
         ret = f(*args, **kwargs)
         return ret
 
