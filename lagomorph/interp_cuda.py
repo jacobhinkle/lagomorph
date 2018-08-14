@@ -341,56 +341,92 @@ triLerp(const Real* img,
                          u         * (v2 * oneMinusV + v5 * v));
 }
 
+template<BackgroundStrategy backgroundStrategy, int displacement>
+inline __device__
+void
+interp_vectorfield_kernel_2d(int i, int j, Real* out, Real* g, Real* h,
+            int nn, int nx, int ny) {
+    if (i >= nx || j >= ny) return;
+    int nxy = nx*ny;
+    int inx = i*ny + j;
+    int iny = inx + nxy;
+    int ino = inx;
+    Real* gd = g;
+    for (int n=0; n < nn; ++n) {
+        Real hx = h[inx];
+        Real hy = h[iny];
+        if (displacement) {
+            hx += static_cast<Real>(i);
+            hy += static_cast<Real>(j);
+        }
+        out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(gd,
+            hx, hy,
+            nx, ny,
+            0.f);
+        ino += nxy;
+        gd += nxy;
+        out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(gd,
+            hx, hy,
+            nx, ny,
+            0.f);
+        ino += nxy;
+        gd += nxy;
+        inx += 2*nxy;
+        iny += 2*nxy;
+    }
+}
+
+template<BackgroundStrategy backgroundStrategy, int displacement>
+inline __device__
+void
+interp_image_kernel_2d(int i, int j, Real* out, Real* I, Real* h,
+            int nn, int nx, int ny) {
+    if (i >= nx || j >= ny) return;
+    int nxy = nx*ny;
+    int inx = i*ny + j;
+    int iny = inx + nxy;
+    int ino = inx;
+    for (int n=0; n < nn; ++n) {
+        Real hx = h[inx];
+        Real hy = h[iny];
+        if (displacement) {
+            hx += static_cast<Real>(i);
+            hy += static_cast<Real>(j);
+        }
+        out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(I,
+            hx, hy,
+            nx, ny,
+            0.f);
+        inx += 2*nxy;
+        iny += 2*nxy;
+        ino += nxy;
+    }
+}
+
 extern "C" {
     __global__ void interp_image_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
-        if (i >= nx || j >= ny) return;
-        int nxy = nx*ny;
-        int inx = i*ny + j;
-        int iny = inx + nxy;
-        int ino = inx;
-        for (int n=0; n < nn; ++n) {
-            Real hx = h[inx];
-            Real hy = h[iny];
-            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(I,
-                hx, hy,
-                nx, ny,
-                0.f);
-            inx += 2*nxy;
-            iny += 2*nxy;
-            ino += nxy;
-        }
+        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(i, j, out, I, h, nn, nx, ny);
+    }
+    __global__ void interp_displacement_image_2d(Real* out, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1>(i, j, out, I, h, nn, nx, ny);
     }
     __global__ void interp_vectorfield_2d(Real* out, Real* g, Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
-        if (i >= nx || j >= ny) return;
-        int nxy = nx*ny;
-        int inx = i*ny + j;
-        int iny = inx + nxy;
-        int ino = inx;
-        Real* gd = g;
-        for (int n=0; n < nn; ++n) {
-            Real hx = h[inx];
-            Real hy = h[iny];
-            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(gd,
-                hx, hy,
-                nx, ny,
-                0.f);
-            ino += nxy;
-            gd += nxy;
-            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(gd,
-                hx, hy,
-                nx, ny,
-                0.f);
-            ino += nxy;
-            gd += nxy;
-            inx += 2*nxy;
-            iny += 2*nxy;
-        }
+        interp_vectorfield_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(i, j, out, g, h, nn, nx, ny);
+    }
+    __global__ void interp_displacement_vectorfield_2d(Real* out, Real* g, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        interp_vectorfield_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1>(i, j, out, g, h, nn, nx, ny);
     }
     __global__ void interp_image_bcastI_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
@@ -446,5 +482,7 @@ extern "C" {
 ''', extra_nvcc_flags=[
         '-DDEFAULT_BACKGROUND_STRATEGY=BACKGROUND_STRATEGY_CLAMP'])
 interp_image_2d = mod.func("interp_image_2d")
+interp_displacement_image_2d = mod.func("interp_displacement_image_2d")
 interp_vectorfield_2d = mod.func("interp_vectorfield_2d")
+interp_displacement_vectorfield_2d = mod.func("interp_displacement_vectorfield_2d")
 interp_image_bcastI_2d = mod.func("interp_image_bcastI_2d")

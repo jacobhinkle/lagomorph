@@ -6,7 +6,7 @@ import pycuda.autoinit
 import numpy as np
 from .arithmetic import multiply_add
 from .metric import FluidMetric
-from .deform import identitylikedef, composeHV
+from .deform import composeHV
 from . import adjrep
 
 def expmap(m0, metric, T=1.0, Nsteps=10, phiinv=None):
@@ -18,8 +18,7 @@ def expmap(m0, metric, T=1.0, Nsteps=10, phiinv=None):
     """
     d = m0.ndim-2
 
-    if phiinv is None:
-        phiinv = identitylikedef(m0)
+    phiinv = gpuarray.zeros_like(m0)
 
     dt = T/Nsteps
 
@@ -60,7 +59,7 @@ def jacobi_field_backward(m0, metric, phiinv, lamT, lam=None, mu=None, T=1.0, Ns
 
     # g maps from 0 to t. h maps from T to t.
     ginv = phiinv.copy()
-    hinv = identitylikedef(m0)
+    hinv = gpuarray.zeros_like(ginv)
     mu = gpuarray.zeros_like(hinv)
 
     dt = T/Nsteps

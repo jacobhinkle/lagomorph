@@ -163,8 +163,10 @@ divergence_kernel(Real* out, const Real* v,
 // Templated function to compute the Jacobian matrix of the first vector field
 // and contract it with the second vector field in a point-wise fashion. The
 // Jacobian will be transposed first if the template argument 'transpose' is 1
-// instead of 0.
-template<BackgroundStrategy backgroundStrategy, int transpose>
+// instead of 0. If the template argument displacement is 1 then the vector
+// field v will be treated as the displacement of a deformation whose jacobian
+// we compute.
+template<BackgroundStrategy backgroundStrategy, int transpose, int displacement>
 inline __device__
 void
 jacobian_times_vectorfield_kernel(Real* out, const Real* v, const Real* w,
@@ -182,19 +184,33 @@ jacobian_times_vectorfield_kernel(Real* out, const Real* v, const Real* w,
             grad_point<backgroundStrategy>(gx, gy, vn, nx, ny, i, j);
             vn += nxy; // move to next component
             grad_point<backgroundStrategy>(gx2, gy2, vn, nx, ny, i, j);
-            out[ino] = gx*w[inx] + gx2*w[iny];
-            ino += nxy;
-            out[ino] = gy*w[inx] + gy2*w[iny];
+            if (displacement) {
+                out[ino] = (gx+1.0f)*w[inx] + gx2*w[iny];
+                ino += nxy;
+                out[ino] = gy*w[inx] + (gy2+1.0f)*w[iny];
+            } else {
+                out[ino] = gx*w[inx] + gx2*w[iny];
+                ino += nxy;
+                out[ino] = gy*w[inx] + gy2*w[iny];
+            }
             vn += nxy; // move to next image
             ino += nxy;
         } else {
             // get gradient of each component of vn
             grad_point<backgroundStrategy>(gx, gy, vn, nx, ny, i, j);
-            out[ino] = gx*w[inx] + gy*w[iny];
-            vn += nxy; // move to next component
-            ino += nxy;
-            grad_point<backgroundStrategy>(gx, gy, vn, nx, ny, i, j);
-            out[ino] = gx*w[inx] + gy*w[iny];
+            if (displacement) {
+                out[ino] = (gx+1.0f)*w[inx] + gy*w[iny];
+                vn += nxy; // move to next component
+                ino += nxy;
+                grad_point<backgroundStrategy>(gx, gy, vn, nx, ny, i, j);
+                out[ino] = gx*w[inx] + (gy+1.0f)*w[iny];
+            } else {
+                out[ino] = gx*w[inx] + gy*w[iny];
+                vn += nxy; // move to next component
+                ino += nxy;
+                grad_point<backgroundStrategy>(gx, gy, vn, nx, ny, i, j);
+                out[ino] = gx*w[inx] + gy*w[iny];
+            }
             vn += nxy; // move to next image
             ino += nxy;
         }
@@ -227,7 +243,7 @@ extern "C" {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         if (i >= nx || j >= ny) return;
-        jacobian_times_vectorfield_kernel<DEFAULT_BACKGROUND_STRATEGY, 0>(
+        jacobian_times_vectorfield_kernel<DEFAULT_BACKGROUND_STRATEGY, 0, 0>(
             out, v, w, nn, nx, ny, i, j);
     }
     __global__ void jacobian_transpose_times_vectorfield_2d(Real* out,
@@ -236,7 +252,25 @@ extern "C" {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         if (i >= nx || j >= ny) return;
-        jacobian_times_vectorfield_kernel<DEFAULT_BACKGROUND_STRATEGY, 1>(
+        jacobian_times_vectorfield_kernel<DEFAULT_BACKGROUND_STRATEGY, 1, 0>(
+            out, v, w, nn, nx, ny, i, j);
+    }
+    __global__ void jacobian_displacement_times_vectorfield_2d(Real* out,
+            const Real* v, const Real* w,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
+        jacobian_times_vectorfield_kernel<DEFAULT_BACKGROUND_STRATEGY, 0, 1>(
+            out, v, w, nn, nx, ny, i, j);
+    }
+    __global__ void jacobian_displacement_transpose_times_vectorfield_2d(Real* out,
+            const Real* v, const Real* w,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        if (i >= nx || j >= ny) return;
+        jacobian_times_vectorfield_kernel<DEFAULT_BACKGROUND_STRATEGY, 1, 1>(
             out, v, w, nn, nx, ny, i, j);
     }
 }
@@ -247,3 +281,6 @@ divergence_2d = mod.func("divergence_2d")
 jacobian_times_vectorfield_2d = mod.func("jacobian_times_vectorfield_2d")
 jacobian_transpose_times_vectorfield_2d = \
         mod.func("jacobian_transpose_times_vectorfield_2d")
+jacobian_displacement_times_vectorfield_2d = mod.func("jacobian_displacement_times_vectorfield_2d")
+jacobian_displacement_transpose_times_vectorfield_2d = \
+        mod.func("jacobian_displacement_transpose_times_vectorfield_2d")
