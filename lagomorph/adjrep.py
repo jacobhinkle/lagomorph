@@ -4,6 +4,7 @@ Adjoint representation for Diff(R^d)
 from pycuda import gpuarray
 import numpy as np
 
+from .arithmetic import multiply_imvec
 from .diff import gradient, jacobian_times_vectorfield, divergence
 from .deform import interp_vec
 
@@ -40,8 +41,9 @@ def ad_star(v, m):
     """
     out = jacobian_times_vectorfield(v, m, transpose=True) + jacobian_times_vectorfield(m, v)     
     dv = divergence(v)
-    for d in range(m.shape[1]):
-        out[:,d,...] += m[:,d,...]*dv
+    mdv = multiply_imvec(dv, m)
+    del dv
+    out += mdv
     return out
 def Ad_star(phi, m, displacement=True, out=None):
     """

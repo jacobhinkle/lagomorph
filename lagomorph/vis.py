@@ -4,7 +4,7 @@ import numpy as np
 
 from .deform import identitylikedef
 
-def gridplot(u, Nx=None, Ny=None, displacement=True, color='black', **kwargs):
+def gridplot(u, Nx=64, Ny=64, displacement=True, color='black', **kwargs):
     """Given a displacement field, plot a displaced grid"""
     assert u.shape[0] == 1, "Only send one deformation at a time"
     if isinstance(u, gpuarray.GPUArray):
@@ -32,7 +32,7 @@ def gridplot(u, Nx=None, Ny=None, displacement=True, color='black', **kwargs):
     plt.axis('equal')
     plt.gca().invert_yaxis()
 
-def quiver(u, Nx=None, Ny=None, color='black', units='xy', scale=1.0, **kwargs):
+def quiver(u, Nx=32, Ny=32, color='black', units='xy', angles='xy', scale=1.0, **kwargs):
     """Given a displacement field, plot a quiver of vectors"""
     assert u.shape[0] == 1, "Only send one deformation at a time"
     if isinstance(u, gpuarray.GPUArray):
@@ -45,7 +45,7 @@ def quiver(u, Nx=None, Ny=None, color='black', units='xy', scale=1.0, **kwargs):
     h = np.copy(u[:,:,::u.shape[2]//Nx, ::u.shape[3]//Ny])
     ix = identitylikedef(u)[:,:,::u.shape[2]//Nx, ::u.shape[3]//Ny]
     # create a meshgrid of locations
-    plt.quiver(ix[0,1,:,:], ix[0,0,:,:], h[0,1,:,:], -h[0,0,:,:], color=color,
-               units=units, scale=scale, **kwargs)
+    plt.quiver(ix[0,1,:,:], ix[0,0,:,:], h[0,1,:,:], h[0,0,:,:], color=color,
+               angles=angles, units=units, scale=scale, **kwargs)
     plt.axis('equal')
     plt.gca().invert_yaxis()

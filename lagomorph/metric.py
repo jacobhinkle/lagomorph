@@ -9,6 +9,7 @@ import numpy as np
 import math
 
 from . import metric_cuda
+from .memory import alloc
 from .dtypes import dtype2precision
 
 class FluidMetric(object):
@@ -46,7 +47,8 @@ class FluidMetric(object):
         else:
             raise Exception(f"Unsupported precision: {precision}")
         # initialize memory for out of place fft
-        self.Fv = gpuarray.empty(shape=self.complexshape, dtype=self.complex_dtype, order='C')
+        self.Fv = gpuarray.empty(shape=self.complexshape, allocator=alloc,
+                dtype=self.complex_dtype, order='C')
         # initialize lookup tables and send them up to the gpu
         self.initialize_luts()
         # fft plan
@@ -61,10 +63,10 @@ class FluidMetric(object):
         for (Nf,N) in zip(self.complexshape[2:], self.shape[2:]):
             self.luts['cos'].append(gpuarray.to_gpu(
                 np.require((1.-np.cos(2*np.pi*np.arange(N, dtype=self.dtype)/N)),
-                    requirements='C')))
+                    requirements='C'), allocator=alloc))
             self.luts['sin'].append(gpuarray.to_gpu(
                 np.require(np.sin(2.*np.pi*np.arange(N, dtype=self.dtype)/N),
-                    requirements='C')))
+                    requirements='C'), allocator=alloc))
     def operator_fourier(self, Fm, inverse=False):
         # call the appropriate cuda kernel here
         block = (32,32,1)
@@ -94,18 +96,10 @@ class FluidMetric(object):
         assert m.flags.c_contiguous, "Momentum array must be contiguous"
         assert self.Fv.flags.c_contiguous, "Fv must be contiguous"
         if out is None:
-            out = gpuarray.empty_like(m, dtype=self.dtype, order='C')
-        #origshape = m.shape
-        #fftshape = (m.shape[0]*m.shape[1], m.shape[2], m.shape[3])
-        #m = m.reshape(fftshape)
-        #self.Fv = self.Fv.reshape(fftshape)
-        skcuda.fft.fft(m.astype(self.dtype), self.Fv, self.fftplan, scale=True)
-        #self.Fv = self.Fv.reshape(origshape)
+            out = gpuarray.empty_like(m)
+        skcuda.fft.fft(m, self.Fv, self.fftplan, scale=True)
         self.operator_fourier(self.Fv, inverse=True)
-        #self.Fv = self.Fv.reshape(fftshape)
         skcuda.fft.ifft(self.Fv, out, self.ifftplan)
-        #m = m.reshape(origshape)
-        #self.Fv = self.Fv.reshape(origshape)
         return out
     def flat(self, m, out=None):
         """
@@ -113,9 +107,10 @@ class FluidMetric(object):
         (a momentum)
         https://en.wikipedia.org/wiki/Musical_isomorphism
         """
-        #raise Exception("Flat not working")
+        assert m.flags.c_contiguous, "Momentum array must be contiguous"
+        assert self.Fv.flags.c_contiguous, "Fv must be contiguous"
         if out is None:
-            out = gpuarray.empty_like(m, dtype=self.dtype, order='C')
+            out = gpuarray.empty_like(m)
         skcuda.fft.fft(m.astype(self.dtype), self.Fv, self.fftplan)
         self.operator_fourier(self.Fv, inverse=False)
         skcuda.fft.ifft(self.Fv, out, self.ifftplan, scale=True)

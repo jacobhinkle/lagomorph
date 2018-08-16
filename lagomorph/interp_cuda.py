@@ -116,6 +116,140 @@ inline __device__ bool isInside(int floorX,int floorY,int floorZ,
             floorZ >= 0 && ceilZ < sizeZ);
 }
 
+template<BackgroundStrategy backgroundStrategy>
+inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
+        Real ww, Real mass,
+        int xInt, int yInt,
+        int w, int h) {
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrap(xInt, w);
+        wrap(yInt, h);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clamp(xInt, w);
+        clamp(yInt, h);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+        if (xInt < 0 || xInt >= w) return;
+        if (yInt < 0 || yInt >= h) return;
+    }else{
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+	return;
+    }
+    int nid = xInt * h + yInt;
+    atomicAdd(&d_ww[nid], ww);
+    ww *= mass;
+    atomicAdd(&d_wd[nid], ww);
+}
+
+template<BackgroundStrategy backgroundStrategy>
+inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
+        Real ww, Real mass,
+        int xInt, int yInt, int zInt,
+        int w, int h, int l) {
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrap(xInt, w);
+        wrap(yInt, h);
+        wrap(zInt, l);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clamp(xInt, w);
+        clamp(yInt, h);
+        clamp(zInt, l);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+
+	if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	   backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+	    background = 0.f;
+	}
+        if (xInt < 0 || xInt >= w) return;
+        if (yInt < 0 || yInt >= h) return;
+        if (zInt < 0 || zInt >= l) return;
+    }else{
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+	return 0.f;
+    }
+    int nid = (xInt * h + yInt) * l + zInt;
+    atomicAdd(&d_ww[nid], ww);
+    ww *= mass;
+    atomicAdd(&d_wd[nid], ww);
+}
+
+template<BackgroundStrategy backgroundStrategy>
+inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
+        Real mass, Real x, Real y,
+        int w, int h)
+{
+    int xInt = int(x);
+    int yInt = int(y);
+
+    if (x < 0 && x != xInt) --xInt;
+    if (y < 0 && y != yInt) --yInt;
+
+    Real dx = 1.f - (x - xInt);
+    Real dy = 1.f - (y - yInt);
+
+    for (int xi=xInt;xi<xInt+2;xi++) {
+        for (int yi=yInt;yi<yInt+2;yi++) {
+            splat_neighbor<backgroundStrategy>(d_ww, d_wd, dx * dy,
+                mass, xi, yi, w, h);
+            dy = 1.-dy;
+        }
+        dx = 1.f-dx;
+    }
+}
+template<BackgroundStrategy backgroundStrategy>
+inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
+        Real mass, Real x, Real y, Real z,
+        int w, int h, int l)
+{
+    int xInt = int(x);
+    int yInt = int(y);
+    int zInt = int(z);
+
+    if (x < 0 && x != xInt) --xInt;
+    if (y < 0 && y != yInt) --yInt;
+    if (z < 0 && z != zInt) --zInt;
+
+    Real dx = 1.f - (x - xInt);
+    Real dy = 1.f - (y - yInt);
+    Real dz = 1.f - (z - zInt);
+
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, dx * dy * dz,
+        mass, xInt, yInt, zInt, w, h, l);
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, dx * dy * (1.f-dz),
+        mass, xInt, yInt, zInt+1, w, h, l);
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, dx * (1.f-dy) * dz,
+        mass, xInt, yInt+1, zInt, w, h, l);
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, dx * (1.f-dy) * (1.f-dz),
+        mass, xInt, yInt+1, zInt+1, w, h, l);
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, (1.f-dx) * dy * dz,
+        mass, xInt+1, yInt, zInt, w, h, l);
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, (1.f-dx) * dy * (1.f-dz),
+        mass, xInt+1, yInt, zInt+1, w, h, l);
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, (1.f-dx) * (1.f-dy) * dz,
+        mass, xInt+1, yInt+1, zInt, w, h, l);
+    splat_neighbor<backgroundStrategy>(d_ww, d_wd, (1.f-dx) * (1.f-dy) * (1.f-dz),
+        mass, xInt+1, yInt+1, zInt+1, w, h, l);
+}
+
 // Bilerp function for single array input
 template<BackgroundStrategy backgroundStrategy>
 inline __device__
@@ -344,20 +478,24 @@ triLerp(const Real* img,
 template<BackgroundStrategy backgroundStrategy, int displacement>
 inline __device__
 void
-interp_vectorfield_kernel_2d(int i, int j, Real* out, Real* g, Real* h,
+interp_vectorfield_kernel_2d(int i, int j, Real* out, const Real* g, const Real* h,
             int nn, int nx, int ny) {
     if (i >= nx || j >= ny) return;
     int nxy = nx*ny;
     int inx = i*ny + j;
     int iny = inx + nxy;
     int ino = inx;
-    Real* gd = g;
+    Real hx, hy;
+    Real fi = static_cast<Real>(i);
+    Real fj = static_cast<Real>(j);
+    const Real* gd = g;
     for (int n=0; n < nn; ++n) {
-        Real hx = h[inx];
-        Real hy = h[iny];
         if (displacement) {
-            hx += static_cast<Real>(i);
-            hy += static_cast<Real>(j);
+            hx = h[inx] + fi;
+            hy = h[iny] + fj;
+        } else {
+            hx = h[inx];
+            hy = h[iny];
         }
         out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(gd,
             hx, hy,
@@ -403,7 +541,50 @@ interp_image_kernel_2d(int i, int j, Real* out, Real* I, Real* h,
     }
 }
 
+template<BackgroundStrategy backgroundStrategy, int displacement>
+inline __device__
+void
+splat_image_kernel_2d(int i, int j, Real* d_wd, Real* d_ww, Real* I, Real* h,
+            int nn, int nx, int ny) {
+    if (i >= nx || j >= ny) return;
+    int nxy = nx*ny;
+    int inx = i*ny + j;
+    int iny = inx + nxy;
+    int ino = inx;
+    Real* dn = d_wd;
+    Real* wn = d_ww;
+    for (int n=0; n < nn; ++n) {
+        Real hx = h[inx];
+        Real hy = h[iny];
+        if (displacement) {
+            hx += static_cast<Real>(i);
+            hy += static_cast<Real>(j);
+        }
+        atomicSplat<DEFAULT_BACKGROUND_STRATEGY>(dn, wn,
+            I[ino], hx, hy, nx, ny);
+        inx += 2*nxy;
+        iny += 2*nxy;
+        dn += nxy;
+        wn += nxy;
+        ino += nxy;
+    }
+}
+
 extern "C" {
+    __global__ void splat_image_2d(Real* d_wd, Real* d_ww, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(i, j,
+            d_wd, d_ww, I, h, nn, nx, ny);
+    }
+    __global__ void splat_displacement_image_2d(Real* d_wd, Real* d_ww, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1>(i, j,
+            d_wd, d_ww, I, h, nn, nx, ny);
+    }
     __global__ void interp_image_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -422,7 +603,7 @@ extern "C" {
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         interp_vectorfield_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(i, j, out, g, h, nn, nx, ny);
     }
-    __global__ void interp_displacement_vectorfield_2d(Real* out, Real* g, Real* h,
+    __global__ void interp_displacement_vectorfield_2d(Real* out, const Real* g, const Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
@@ -481,6 +662,8 @@ extern "C" {
 }
 ''', extra_nvcc_flags=[
         '-DDEFAULT_BACKGROUND_STRATEGY=BACKGROUND_STRATEGY_CLAMP'])
+splat_image_2d = mod.func("splat_image_2d")
+splat_displacement_image_2d = mod.func("splat_displacement_image_2d")
 interp_image_2d = mod.func("interp_image_2d")
 interp_displacement_image_2d = mod.func("interp_displacement_image_2d")
 interp_vectorfield_2d = mod.func("interp_vectorfield_2d")
