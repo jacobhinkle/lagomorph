@@ -80,12 +80,16 @@ def jacobi_field_backward(m0, metric, phiinv, diffT, I0, T=1.0, Nsteps=10):
         lam = multiply_imvec(splatdiff, gradI)
         lam = metric.sharp(lam, out=lam)
         # negative time derivative of mu is sym^dagger v mu + lambda
+        # recall sym^dagger x y = ad_dagger y, x - ad x y
+        # so given Lv, sym^dagger v mu = K ad^* mu Lv - ad v mu
+        # meaning we should compute ad^* before sharping v in order to reduce
+        # the number of sharp operations
         dmu = adjrep.sym_dagger(mv, mu, metric)
-        multiply_add(lam, 1.0, out=dmu)
+        multiply_add(lam, -1.0, out=dmu)
         # update mu
         multiply_add(dmu, dt, out=mu)
         # take a step along v
         ginv = composeHV(ginv, mv, dt=dt)
-        h = composeVH(h, mv, dt=-dt)
+        h = composeVH(h, mv, dt=dt)
 
     return mu
