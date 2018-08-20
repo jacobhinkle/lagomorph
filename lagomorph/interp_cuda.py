@@ -24,6 +24,8 @@ __device__ Real get_pixel_2d(int x, int y,
                                     const Real* d_i,
                                     int sizeX, int sizeY)
 {
+    if (x < 0 || x >= sizeX ||
+        y < 0 || y >= sizeY) return 0;
     int index =  x * sizeY + y;
     return d_i[index];
 }
@@ -121,19 +123,20 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt,
         int w, int h) {
+    int i=xInt, j=yInt;
     if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
-        wrap(xInt, w);
-        wrap(yInt, h);
+        wrap(i, w);
+        wrap(j, h);
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
-        clamp(xInt, w);
-        clamp(yInt, h);
+        clamp(i, w);
+        clamp(j, h);
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
 	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
 	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
-        if (xInt < 0 || xInt >= w) return;
-        if (yInt < 0 || yInt >= h) return;
+        if (i < 0 || i >= w) return;
+        if (j < 0 || j >= h) return;
     }else{
 	// unknown background strategy, don't allow compilation
 	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
@@ -144,7 +147,7 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
                       "Unknown background strategy");
 	return;
     }
-    int nid = xInt * h + yInt;
+    int nid = i * h + j;
     atomicAdd(&d_ww[nid], ww);
     atomicAdd(&d_wd[nid], ww*mass);
 }

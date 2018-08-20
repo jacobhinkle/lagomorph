@@ -1,12 +1,10 @@
 from pycuda import gpuarray
-import pycuda.autoinit
 import numpy as np
 
 import math
 
 from .deform import imshape2defshape, defshape2imshape
 from .dtypes import dtype2precision
-from .memory import alloc
 from . import diff_cuda
 
 def gradient(im, out=None):
@@ -14,12 +12,10 @@ def gradient(im, out=None):
     Compute the finite-difference gradient of an image set
     """
     if out is None:
-        out = gpuarray.empty(shape=imshape2defshape(im.shape), allocator=alloc,
-                dtype=im.dtype, order='C')
+        out = gpuarray.empty(shape=imshape2defshape(im.shape),
+                allocator=im.allocator, dtype=im.dtype, order='C')
     prec = dtype2precision(out.dtype)
     dim = im.ndim - 1
-    if not isinstance(im, gpuarray.GPUArray):
-        im = gpuarray.to_gpu(np.asarray(im), allocator=alloc)
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(im.shape[1]/block[0]), math.ceil(im.shape[2]/block[1]), 1)
@@ -39,12 +35,10 @@ def divergence(v, out=None):
     Compute the finite-difference divergence of a vector field set
     """
     if out is None:
-        out = gpuarray.empty(shape=defshape2imshape(v.shape), allocator=alloc,
-                dtype=v.dtype, order='C')
+        out = gpuarray.empty(shape=defshape2imshape(v.shape),
+                allocator=v.allocator, dtype=v.dtype, order='C')
     prec = dtype2precision(out.dtype)
     dim = v.ndim - 2
-    if not isinstance(v, gpuarray.GPUArray):
-        v = gpuarray.to_gpu(np.asarray(v), allocator=alloc)
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(v.shape[2]/block[0]), math.ceil(v.shape[3]/block[1]), 1)
@@ -69,14 +63,10 @@ def jacobian_times_vectorfield(v, w, transpose=False, displacement=False, out=No
     should be computed (by adding ones to the diagonal) instead of v itself.
     """
     if out is None:
-        out = gpuarray.empty(shape=v.shape, allocator=alloc, dtype=v.dtype,
+        out = gpuarray.empty(shape=v.shape, allocator=v.allocator, dtype=v.dtype,
                 order='C')
     prec = dtype2precision(out.dtype)
     dim = v.ndim - 2
-    if not isinstance(v, gpuarray.GPUArray):
-        v = gpuarray.to_gpu(np.asarray(v), allocator=alloc)
-    if not isinstance(w, gpuarray.GPUArray):
-        w = gpuarray.to_gpu(np.asarray(w), allocator=alloc)
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(v.shape[2]/block[0]), math.ceil(v.shape[3]/block[1]), 1)

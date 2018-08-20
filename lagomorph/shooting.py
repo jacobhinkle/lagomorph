@@ -2,7 +2,6 @@
 Vector and scalar momentum shooting algorithms
 """
 from pycuda import gpuarray
-import pycuda.autoinit
 import numpy as np
 from .arithmetic import multiply_add, multiply_imvec
 from .metric import FluidMetric
@@ -10,7 +9,7 @@ from .diff import gradient
 from .deform import composeHV, composeVH, interp_image, splat_image
 from . import adjrep
 
-def expmap(m0, metric, T=1.0, Nsteps=10, phiinv=None):
+def expmap(m0, metric, T=1.0, Nsteps=50, phiinv=None):
     """
     Given an initial momentum (Lie algebra element), compute the exponential
     map.
@@ -33,7 +32,7 @@ def expmap(m0, metric, T=1.0, Nsteps=10, phiinv=None):
 
     return phiinv
 
-def jacobi_field_backward(m0, metric, phiinv, diffT, I0, T=1.0, Nsteps=10):
+def jacobi_field_backward(m0, metric, phiinv, diffT, I0, T=1.0, Nsteps=50):
     """
     Integrate the geodesic regression adjoint equation (Jacobi field). You must
     provide the initial vector momentum for the geodesic, the metric kernel, and
@@ -76,7 +75,7 @@ def jacobi_field_backward(m0, metric, phiinv, diffT, I0, T=1.0, Nsteps=10):
         It = interp_image(I0, ginv)
         gradI = gradient(It)
         splatdiff, w = splat_image(diffT, h)
-        del w
+        #del w
         lam = multiply_imvec(splatdiff, gradI)
         lam = metric.sharp(lam, out=lam)
         # negative time derivative of mu is sym^dagger v mu + lambda

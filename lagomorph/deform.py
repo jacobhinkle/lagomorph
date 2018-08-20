@@ -1,15 +1,11 @@
-import pycuda.driver as cuda
-import pycuda.autoinit
 from pycuda.compiler import SourceModule
 from pycuda import gpuarray
-import pycuda.driver as drv
 
 import numpy as np
 import math
 
 from . import interp_cuda as ic
 from .dtypes import dtype2precision
-from .memory import alloc
 from .arithmetic import multiply_add
 
 def interp_image_kernel(out, I, h, displacement=True):
@@ -17,10 +13,6 @@ def interp_image_kernel(out, I, h, displacement=True):
     assert out.dtype == I.dtype and I.dtype == h.dtype, "dtypes of all args must match"
     prec = dtype2precision(out.dtype)
     dim = I.ndim - 1
-    if not isinstance(I, gpuarray.GPUArray):
-        I = gpuarray.to_gpu(np.asarray(I), allocator=alloc)
-    if not isinstance(h, gpuarray.GPUArray):
-        h = gpuarray.to_gpu(np.asarray(h), allocator=alloc)
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(I.shape[1]/block[0]), math.ceil(I.shape[2]/block[1]), 1)
@@ -43,10 +35,6 @@ def splat_image_kernel(out, outweights, I, h, displacement=True):
     assert out.dtype == I.dtype and I.dtype == h.dtype, "dtypes of all args must match"
     prec = dtype2precision(out.dtype)
     dim = I.ndim - 1
-    if not isinstance(I, gpuarray.GPUArray):
-        I = gpuarray.to_gpu(np.asarray(I), allocator=alloc)
-    if not isinstance(h, gpuarray.GPUArray):
-        h = gpuarray.to_gpu(np.asarray(h), allocator=alloc)
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(I.shape[1]/block[0]), math.ceil(I.shape[2]/block[1]), 1)
@@ -74,10 +62,6 @@ def interp_vectorfield_kernel(out, g, h, displacement=True):
     assert g.shape[1] == dim, "vectorfields must have appropriate number of channels"
     assert h.shape[1] == dim, "vectorfields must have appropriate number of channels"
     assert out.shape[1] == dim, "vectorfields must have appropriate number of channels"
-    if not isinstance(g, gpuarray.GPUArray):
-        g = gpuarray.to_gpu(np.asarray(g), allocator=alloc)
-    if not isinstance(h, gpuarray.GPUArray):
-        h = gpuarray.to_gpu(np.asarray(h), allocator=alloc)
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(g.shape[2]/block[0]), math.ceil(g.shape[3]/block[1]), 1)
@@ -101,10 +85,6 @@ def interp_image_kernel_bcastI(out, I, h):
     assert out.dtype == I.dtype and I.dtype == h.dtype, "dtypes of all args must match"
     prec = dtype2precision(out.dtype)
     dim = I.ndim - 1
-    if not isinstance(I, gpuarray.GPUArray):
-        I = gpuarray.to_gpu(np.asarray(I), allocator=alloc)
-    if not isinstance(h, gpuarray.GPUArray):
-        h = gpuarray.to_gpu(np.asarray(h), allocator=alloc)
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(I.shape[1]/block[0]), math.ceil(I.shape[2]/block[1]), 1)
@@ -135,8 +115,8 @@ def interp_image(I, h, displacement=True, out=None):
     assert I.ndim == h.ndim-1, "Dimension of I must be one less that of h"
     assert h.shape[1] == dim, "h must have same number channels as dim"
     if out is None:
-        out = gpuarray.empty(shape=defshape2imshape(h.shape), allocator=alloc,
-	     dtype=I.dtype, order='C')
+        out = gpuarray.empty(shape=defshape2imshape(h.shape),
+                allocator=I.allocator, dtype=I.dtype, order='C')
     assert out.shape == defshape2imshape(h.shape), "Output must have same domain as h"
     if I.shape[0] == 1 and h.shape[0] != 1:
         interp_image_kernel_bcastI(out, I, h)
@@ -206,25 +186,6 @@ def identity(defshape, dtype=np.float32):
         ix[:,d,...] = np.arange(ld, dtype=dtype).reshape(shd)
     return np.ascontiguousarray(ix)
 
-
-def identitylikeim(im):
-    """
-    Given a deformation
-    """
-    ix = identity(imshape2defshape(im.shape), dtype=im.dtype)
-    if isinstance(im, gpuarray.GPUArray):
-        ix = gpuarray.to_gpu(ix, allocator=alloc)
-    return ix
-
-def identitylikedef(h):
-    """
-    Given a deformation
-    """
-    ix = identity(h.shape, dtype=h.dtype)
-    if isinstance(h, gpuarray.GPUArray):
-        ix = gpuarray.to_gpu(ix, allocator=alloc)
-    return ix
-
 def composeHV(h, v, dt=1.0, displacement=True, out=None):
     """
     Given a deformation h, a velocity v, and a time step dt, compute h(x+dt*v(x))
@@ -244,7 +205,7 @@ def composeVH(v, h, dt=1.0, displacement=True, out=None):
     """
     if out is None:
         out = gpuarray.empty_like(h)
-    drv.memcpy_dtod(out.gpudata, h.gpudata, size=h.nbytes)
+    #drv.memcpy_dtod(out.gpudata, h.gpudata, size=h.nbytes)
     vh = interp_vec(v, h, displacement=displacement)
     multiply_add(vh, dt, out=out)
     return out

@@ -2,7 +2,7 @@ from pycuda import gpuarray
 from matplotlib import pyplot as plt
 import numpy as np
 
-from .deform import identitylikedef
+from .deform import identity
 
 def gridplot(u, Nx=64, Ny=64, displacement=True, color='black', **kwargs):
     """Given a displacement field, plot a displaced grid"""
@@ -43,7 +43,7 @@ def quiver(u, Nx=32, Ny=32, color='black', units='xy', angles='xy', scale=1.0, *
         Ny = u.shape[3]
     # downsample displacements
     h = np.copy(u[:,:,::u.shape[2]//Nx, ::u.shape[3]//Ny])
-    ix = identitylikedef(u)[:,:,::u.shape[2]//Nx, ::u.shape[3]//Ny]
+    ix = identity(u.shape, u.dtype)[:,:,::u.shape[2]//Nx, ::u.shape[3]//Ny]
     # create a meshgrid of locations
     plt.quiver(ix[0,1,:,:], ix[0,0,:,:], h[0,1,:,:], h[0,0,:,:], color=color,
                angles=angles, units=units, scale=scale, **kwargs)

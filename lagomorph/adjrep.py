@@ -39,10 +39,10 @@ def ad_star(v, m):
 
     where div denotes the divergence of a vector field
     """
-    out = jacobian_times_vectorfield(v, m, transpose=True) + jacobian_times_vectorfield(m, v)     
+    out = jacobian_times_vectorfield(v, m, transpose=True)
+    out += jacobian_times_vectorfield(m, v)     
     dv = divergence(v)
     mdv = multiply_imvec(dv, m)
-    del dv
     out += mdv
     return out
 def Ad_star(phi, m, displacement=True, out=None):

@@ -1,19 +1,16 @@
 """
 Fluid and other LDDMM metrics
 """
-import skcuda.fft
 from pycuda import gpuarray, cumath
-from pycuda.autoinit import context
 import numpy as np
 
 import math
 
 from . import metric_cuda
-from .memory import alloc
 from .dtypes import dtype2precision
 
 class FluidMetric(object):
-    def __init__(self, shape, alpha, beta, gamma, precision='single'):
+    def __init__(self, shape, alpha, beta, gamma, allocator=None, precision='single'):
         """
         This kernel is the Green's function for:
 
@@ -31,6 +28,7 @@ class FluidMetric(object):
         self.alpha = float(alpha)
         self.beta = float(beta)
         self.gamma = float(gamma)
+        self.luts = None
         if gamma <= 4*alpha + 2*beta and False:
             print("WARNING: ill-conditioned kernel. gamma <= "
                 f"4*alpha + 2*beta = {4*alpha + 2*beta}")
@@ -46,29 +44,32 @@ class FluidMetric(object):
             self.complex_dtype = np.complex128
         else:
             raise Exception(f"Unsupported precision: {precision}")
-        # initialize memory for out of place fft
-        self.Fv = gpuarray.empty(shape=self.complexshape, allocator=alloc,
-                dtype=self.complex_dtype, order='C')
-        # initialize lookup tables and send them up to the gpu
-        self.initialize_luts()
         # fft plan
-        self.fftplan = skcuda.fft.Plan(self.shape[2:], self.dtype, self.complex_dtype, batch=shape[0]*shape[1])
-        self.ifftplan = skcuda.fft.Plan(self.shape[2:], self.complex_dtype, self.dtype, batch=shape[0]*shape[1])
-    def initialize_luts(self):
+        self.fftplan = None
+        self.ifftplan = None
+    def initialize_plans(self):
+        if self.fftplan is not None:
+            return
+        import skcuda.fft
+        self.fftplan = skcuda.fft.Plan(self.shape[2:], self.dtype, self.complex_dtype, batch=self.shape[0]*self.shape[1])
+        self.ifftplan = skcuda.fft.Plan(self.shape[2:], self.complex_dtype, self.dtype, batch=self.shape[0]*self.shape[1])
+    def initialize_luts(self, allocator=None):
         """
         Fill out lookup tables used in Fourier kernel. This amounts to just
         precomputing the sine and cosine (period N_d) for each dimension.
         """
-        self.luts = {'cos': [], 'sin': []}
-        for (Nf,N) in zip(self.complexshape[2:], self.shape[2:]):
-            self.luts['cos'].append(gpuarray.to_gpu(
-                np.require((1.-np.cos(2*np.pi*np.arange(N, dtype=self.dtype)/N)),
-                    requirements='C'), allocator=alloc))
-            self.luts['sin'].append(gpuarray.to_gpu(
-                np.require(np.sin(2.*np.pi*np.arange(N, dtype=self.dtype)/N),
-                    requirements='C'), allocator=alloc))
+        if self.luts is None:
+            self.luts = {'cos': [], 'sin': []}
+            for (Nf,N) in zip(self.complexshape[2:], self.shape[2:]):
+                self.luts['cos'].append(gpuarray.to_gpu(
+                    np.require(2.*(1.-np.cos(2*np.pi*np.arange(Nf, dtype=self.dtype)/N)),
+                        requirements='C'), allocator=allocator))
+                self.luts['sin'].append(gpuarray.to_gpu(
+                    np.require(np.sin(2.*np.pi*np.arange(Nf, dtype=self.dtype)/N),
+                        requirements='C'), allocator=allocator))
     def operator_fourier(self, Fm, inverse=False):
         # call the appropriate cuda kernel here
+        self.initialize_luts(allocator=Fm.allocator)
         block = (32,32,1)
         grid = (math.ceil(self.complexshape[2]/block[0]), math.ceil(self.complexshape[3]/block[1]), 1)
         if self.dim == 2:
@@ -93,13 +94,16 @@ class FluidMetric(object):
         momentum.
         https://en.wikipedia.org/wiki/Musical_isomorphism
         """
+        import skcuda.fft
         assert m.flags.c_contiguous, "Momentum array must be contiguous"
-        assert self.Fv.flags.c_contiguous, "Fv must be contiguous"
+        # initialize memory for out of place fft
+        Fv = gpuarray.zeros(shape=self.complexshape, dtype=self.complex_dtype)
+        self.initialize_plans()
+        skcuda.fft.fft(m, Fv, self.fftplan)
+        self.operator_fourier(Fv, inverse=True)
         if out is None:
             out = gpuarray.empty_like(m)
-        skcuda.fft.fft(m, self.Fv, self.fftplan, scale=True)
-        self.operator_fourier(self.Fv, inverse=True)
-        skcuda.fft.ifft(self.Fv, out, self.ifftplan)
+        skcuda.fft.ifft(Fv, out, self.ifftplan, scale=True)
         return out
     def flat(self, m, out=None):
         """
@@ -107,11 +111,14 @@ class FluidMetric(object):
         (a momentum)
         https://en.wikipedia.org/wiki/Musical_isomorphism
         """
+        import skcuda.fft
         assert m.flags.c_contiguous, "Momentum array must be contiguous"
-        assert self.Fv.flags.c_contiguous, "Fv must be contiguous"
+        Fv = gpuarray.empty(shape=self.complexshape, allocator=m.allocator,
+                dtype=self.complex_dtype, order='C')
+        self.initialize_plans()
+        skcuda.fft.fft(m.astype(self.dtype), Fv, self.fftplan)
+        self.operator_fourier(Fv, inverse=False)
         if out is None:
             out = gpuarray.empty_like(m)
-        skcuda.fft.fft(m.astype(self.dtype), self.Fv, self.fftplan)
-        self.operator_fourier(self.Fv, inverse=False)
-        skcuda.fft.ifft(self.Fv, out, self.ifftplan, scale=True)
+        skcuda.fft.ifft(Fv, out, self.ifftplan, scale=True)
         return out

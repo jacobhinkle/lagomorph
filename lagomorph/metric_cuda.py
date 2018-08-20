@@ -63,12 +63,6 @@ InverseOperatorMultiply(Complex& bX,
     Real bImagX = bX.y;
     Real bImagY = bY.y;
 
-    Real& vRealX = bX.x;
-    Real& vRealY = bY.x;
-
-    Real& vImagX = bX.y;
-    Real& vImagY = bY.y;
-
     ooG00 = 1./safe_sqrt(L00);
     G10 = L10 * ooG00;
 
@@ -88,13 +82,13 @@ InverseOperatorMultiply(Complex& bX,
     // [   0      0    G(3,3) ]   [ x(3) ] = y(3)
     y0 = bRealX * ooG00;
     y1 = (bRealY - G10*y0) * ooG11;
-    vRealY = y1 * ooG11;
-    vRealX = (y0 - G10*vRealY) * ooG00;
+    bY.x = y1 * ooG11;
+    bX.x = (y0 - G10*bY.x) * ooG00;
 
     y0 = bImagX * ooG00;
     y1 = (bImagY - G10*y0) * ooG11;
-    vImagY = y1 * ooG11;
-    vImagX = (y0 - G10*vImagY) * ooG00;
+    bY.y = y1 * ooG11;
+    bX.y = (y0 - G10*bY.y) * ooG00;
 }
 
 __device__
@@ -108,19 +102,14 @@ OperatorMultiply(Complex& bX,
     Real bImagX = bX.y;
     Real bImagY = bY.y;
 
-    Real& vRealX = bX.x;
-    Real& vRealY = bY.x;
-    Real& vImagX = bX.y;
-    Real& vImagY = bY.y;
-
-    vRealX = L00*bRealX + L10*bRealY;
-    vRealY = L10*bRealX + L11*bRealY;
-    vImagX = L00*bImagX + L10*bImagY;
-    vImagY = L10*bImagX + L11*bImagY;
+    bX.x = L00*bRealX + L10*bRealY;
+    bY.x = L10*bRealX + L11*bRealY;
+    bX.y = L00*bImagX + L10*bImagY;
+    bY.y = L10*bImagX + L11*bImagY;
 }
 
 template<bool inverseOp>
-inline __device__
+__device__
 void
 fluid_kernel_2d(int i, int j,
         Complex* Fm,
@@ -142,9 +131,13 @@ fluid_kernel_2d(int i, int j,
     // alpha and gamma parts are diagonal in Fourier
     const Real lambda = gamma + alpha * (wx + wy);
 
-    L00 = lambda + beta * cosX[i];
-    L11 = lambda + beta * cosY[j];
-    L10 = -beta * sinX[i] * sinY[j];
+    Real l00 = lambda - beta * wx;
+    Real l11 = lambda - beta * wy;
+    Real l10 = beta * sinX[i] * sinY[j];
+    // square this matrix
+    L00 = l00*l00 + l10*l10;
+    L10 = l00*l10 + l10*l11;
+    L11 = l11*l11 + l10*l10;
 
     for (int n=0; n < nn; ++n, ix+=2*nxy, iy+=2*nxy) {
       //

@@ -23,6 +23,8 @@ inline __device__ Real get_pixel_2d(int x, int y,
                                     const Real* d_i,
                                     int sizeX, int sizeY)
 {
+    if (x < 0 || x >= sizeX ||
+        y < 0 || y >= sizeY) return 0;
     int index =  x * sizeY + y;
     return d_i[index];
 }

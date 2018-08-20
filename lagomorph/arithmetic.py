@@ -1,17 +1,18 @@
 from pycuda import gpuarray
-import pycuda.autoinit
 from pycuda.elementwise import ElementwiseKernel
 from pycuda.reduction import ReductionKernel
 import numpy as np
 import math
 
-from .memory import alloc
+from .checks import ContextCheck, count_nans
 from .dtypes import dtype2precision, dtype2ctype
 from .arithmetic_cuda import multiply_imvec_2d
 
-_L2kernels = {xtype: ReductionKernel(np.float64, neutral="0.0",
+
+_L2kernels = {xtype: ContextCheck(ReductionKernel,
+                np.float64, neutral="0.0",
                 reduce_expr="a+b", map_expr="x[i]*y[i]",
-                arguments=f"const {xtype} *x, const {xtype} *y") for xtype in
+                arguments=f"{xtype} *x, {xtype} *y") for xtype in
                 ['float','double']}
 def L2(x, y):
     """Just compute the sum of products of a gpuarray"""
@@ -21,8 +22,8 @@ def L2(x, y):
     xtype = dtype2ctype(x.dtype)
     return _L2kernels[xtype](x, y).get()
 
-_makernels = {xtype: ElementwiseKernel(
-            f"{xtype} *out, const {xtype} *x, {xtype} alpha",
+_makernels = {xtype: ContextCheck(ElementwiseKernel,
+            f"{xtype} *out, {xtype} *x, {xtype} alpha",
             "out[i] += alpha*x[i]",
             "multiply_add") for xtype in ['float', 'double']}
 def multiply_add(x, alpha, out=None):
@@ -32,8 +33,8 @@ def multiply_add(x, alpha, out=None):
     _makernels[xtype](out, x, x.dtype.type(alpha))
     return out
 
-_mulkernels = {xtype: ElementwiseKernel(
-            f"{xtype} *out, const {xtype} *x, const {xtype} *y",
+_mulkernels = {xtype: ContextCheck(ElementwiseKernel,
+            f"{xtype} *out, {xtype} *x, {xtype} *y",
             "out[i] = x[i]*y[i]",
             "multiply") for xtype in ['float', 'double']}
 def multiply(x, y, out=None):
