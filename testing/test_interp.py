@@ -1,5 +1,6 @@
-import pycuda.autoinit
 from pycuda import gpuarray
+import pycuda.autoinit
+from pycuda.tools import mark_cuda_test
 import numpy as np
 import math
 
@@ -19,8 +20,8 @@ def test_interp_zero():
             imsh = tuple([bs]+[res]*dim)
             defsh = tuple([bs,dim]+[res]*dim)
             for prec, dtype in precs:
-                I = gpuarray.zeros(imsh, dtype=dtype)
-                h = lm.to_gpu(np.random.randn(*defsh).astype(dtype))
+                I = gpuarray.zeros(imsh, dtype=dtype, order='C')
+                h = gpuarray.to_gpu(np.random.randn(*defsh).astype(dtype))
                 Ih = lm.interp_image(I, h, displacement=True)
                 normsq = lm.L2(Ih, Ih)
                 assert np.allclose(normsq, 0), (f"Interp zero is not zero image "
@@ -33,8 +34,8 @@ def test_interp_identity():
             imsh = tuple([bs]+[res]*dim)
             defsh = tuple([bs,dim]+[res]*dim)
             for prec, dtype in precs:
-                I = lm.to_gpu(np.random.randn(*imsh).astype(dtype))
-                h = gpuarray.zeros(defsh, dtype=dtype)
+                I = gpuarray.to_gpu(np.random.randn(*imsh).astype(dtype))
+                h = gpuarray.zeros(defsh, dtype=dtype, order='C')
                 Ih = lm.interp_image(I, h, displacement=True)
                 assert np.allclose(I.get(), Ih.get()), (f"Interp along identity is not original image "
                         f"[batch_size={bs} dim={dim} precision={prec} dtype={dtype}]: ")
@@ -45,8 +46,8 @@ def test_splat_zero():
             imsh = tuple([bs]+[res]*dim)
             defsh = tuple([bs,dim]+[res]*dim)
             for prec, dtype in precs:
-                I = gpuarray.zeros(imsh, dtype=dtype)
-                h = lm.to_gpu(np.random.randn(*defsh).astype(dtype))
+                I = gpuarray.zeros(imsh, dtype=dtype, order='C')
+                h = gpuarray.to_gpu(np.random.randn(*defsh).astype(dtype))
                 Ih, _ = lm.splat_image(I, h, displacement=True)
                 normsq = lm.L2(Ih, Ih)
                 assert np.allclose(normsq, 0), (f"Splat along identity is not original image "
@@ -59,8 +60,8 @@ def test_splat_identity():
             imsh = tuple([bs]+[res]*dim)
             defsh = tuple([bs,dim]+[res]*dim)
             for prec, dtype in precs:
-                I = lm.to_gpu(np.random.randn(*imsh).astype(dtype))
-                h = gpuarray.zeros(defsh, dtype=dtype)
+                I = gpuarray.to_gpu(np.random.randn(*imsh).astype(dtype))
+                h = gpuarray.zeros(defsh, dtype=dtype, order='C')
                 Ih, _ = lm.splat_image(I, h, displacement=True)
                 assert np.allclose(I.get(), Ih.get()), (f"Interp zero is not zero image "
                         f"[batch_size={bs} dim={dim} precision={prec} dtype={dtype}]: ")
@@ -71,9 +72,9 @@ def test_interp_splat():
             imsh = tuple([bs]+[res]*dim)
             defsh = tuple([bs,dim]+[res]*dim)
             for prec, dtype in precs:
-                I = lm.to_gpu(np.random.randn(*imsh).astype(dtype))
-                J = lm.to_gpu(np.random.randn(*imsh).astype(dtype))
-                h = lm.to_gpu(np.random.randn(*defsh).astype(dtype))
+                I = gpuarray.to_gpu(np.random.randn(*imsh).astype(dtype))
+                J = gpuarray.to_gpu(np.random.randn(*imsh).astype(dtype))
+                h = gpuarray.to_gpu(np.random.randn(*defsh).astype(dtype))
                 Ih = lm.interp_image(I, h, displacement=True)
                 IhJ = lm.L2(Ih, J)
                 Jh, _ = lm.splat_image(J, h, displacement=True)
