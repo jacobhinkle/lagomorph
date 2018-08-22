@@ -69,26 +69,27 @@ def jacobi_field_backward(m0, metric, phiinv, diffT, I0, T=1.0, Nsteps=50):
 
     for i in reversed(range(Nsteps)): 
         # get m(t) and sharp to get v(t)
-        mv = adjrep.Ad_star(phiinv, m0, out=mv)
-        mv = metric.sharp(mv, out=mv)
-        # get lambda(t) = grad I(t) splat(diffT)
+        m = adjrep.Ad_star(phiinv, m0)
+        v = metric.sharp(m)
+        # get lambda(t) = - grad I(t) splat(diffT)
         It = interp_image(I0, ginv)
         gradI = gradient(It)
         splatdiff, w = splat_image(diffT, h)
         #del w
-        lam = multiply_imvec(splatdiff, gradI)
-        lam = metric.sharp(lam, out=lam)
+        neglam = multiply_imvec(splatdiff, gradI)
         # negative time derivative of mu is sym^dagger v mu + lambda
         # recall sym^dagger x y = ad_dagger y, x - ad x y
-        # so given Lv, sym^dagger v mu = K ad^* mu Lv - ad v mu
+        # so given Lv, sym^dagger v mu = K ad^* mu Lv - ad v K mu
+        # then Lsym^dagger v mu = ad^*_mu m - L ad_v K mu
         # meaning we should compute ad^* before sharping v in order to reduce
         # the number of sharp operations
-        dmu = adjrep.sym_dagger(mv, mu, metric)
-        multiply_add(lam, -1.0, out=dmu)
+        Kmu = metric.sharp(mu)
+        dmu = metric.flat(adjrep.ad(v, Kmu))
+        dmu -= adjrep.ad_star(Kmu, m) # hang onto this
+        dmu += neglam
         # update mu
-        multiply_add(dmu, dt, out=mu)
+        multiply_add(dmu, -dt, out=mu)
         # take a step along v
-        ginv = composeHV(ginv, mv, dt=dt)
-        h = composeVH(h, mv, dt=dt)
-
+        ginv = composeHV(ginv, v, dt=dt)
+        h = composeVH(h, v, dt=-dt)
     return mu
