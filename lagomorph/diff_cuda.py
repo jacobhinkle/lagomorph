@@ -15,7 +15,7 @@ inline __device__ Real get_pixel_3d(int x, int y, int z,
                                     const Real* d_i,
                                     int sizeX, int sizeY, int sizeZ)
 {
-    int index = (x * sizeY + y) * sizeX + z;
+    int index = (x * sizeY + y) * sizeZ + z;
     return d_i[index];
 }
 
@@ -158,6 +158,7 @@ divergence_kernel(Real* out, const Real* v,
         out[ino] = diff_x<backgroundStrategy>(vn, nx, ny, i, j);
         vn += nxy;
         out[ino] += diff_y<backgroundStrategy>(vn, nx, ny, i, j);
+        vn += nxy;
         ino += nxy;
     }
 }
