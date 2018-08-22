@@ -6,7 +6,7 @@ import math
 
 from .checks import ContextCheck, count_nans
 from .dtypes import dtype2precision, dtype2ctype
-from .arithmetic_cuda import multiply_imvec_2d
+from . import arithmetic_cuda as ac
 
 
 _L2kernels = {xtype: ContextCheck(ReductionKernel,
@@ -58,10 +58,52 @@ def multiply_imvec(im, v, out=None):
     if d == 2:
         block = (32,32,1)
         grid = (math.ceil(im.shape[1]/block[0]), math.ceil(im.shape[2]/block[1]), 1)
-        multiply_imvec_2d(out, im, v, im.shape[0], im.shape[1], im.shape[2],
+        ac.multiply_imvec_2d(out, im, v, im.shape[0], im.shape[1], im.shape[2],
                 precision=prec, block=block, grid=grid)
     elif d == 3:
         raise NotImplementedError("not implemented yet")
     else:
         raise Exception(f"Unsupported dimension: {d}")
+    return out
+
+_clipbelowkernels = {xtype: ContextCheck(ElementwiseKernel,
+            f"{xtype} *out, {xtype} *x, {xtype} minval",
+            "out[i] = x[i] < minval ? minval : x[i]",
+            "clip_below") for xtype in ['float', 'double']}
+def clip_below(x, val=0, out=None):
+    """Multiply images and vector fields whose shapes are identical"""
+    xtype = dtype2ctype(x.dtype)
+    if out is None:
+        out = gpuarray.empty_like(x)
+    _clipbelowkernels[xtype](out, x, x.dtype.type(val))
+    return out
+
+def sum_along_axis(x, axis=0, out=None):
+    """Compute the sum along a single axis"""
+    outsh = list(x.shape)
+    outsh[axis] = 1
+    outsh = tuple(outsh)
+    if out is None:
+        out = gpuarray.empty(outsh, dtype=x.dtype, allocator=x.allocator)
+    assert out.shape == outsh, "Output is of wrong shape"
+    prec = dtype2precision(out.dtype)
+    nn = np.prod(x.shape[:axis+1], dtype=np.int32)
+    nxyz = np.prod(x.shape[axis+1:], dtype=np.int32)
+    block = (1024,1,1)
+    grid = (math.ceil(nxyz/block[0]),1,1)
+    ac.sum_along_axis(out, x, nn, nxyz, precision=prec, block=block, grid=grid)
+    return out
+
+def multiply_add_bcast(x, y, alpha=1, out=None):
+    """Multiply y by alpha and add to x, putting output in out and broadcasting
+    y along the first axis"""
+    assert y.shape[0] == 1, "y.shape[0] must be 1"
+    if out is None:
+        out = gpuarray.empty_like(x)
+    prec = dtype2precision(out.dtype)
+    nn = x.shape[0]
+    nxyz = np.prod(x.shape[1:], dtype=np.int32)
+    block = (1024,1,1)
+    grid = (math.ceil(nxyz/block[0]),1,1)
+    ac.multiply_add_bcast(out, x, y, x.dtype.type(alpha), nn, nxyz, precision=prec, block=block, grid=grid)
     return out
