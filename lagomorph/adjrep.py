@@ -15,7 +15,8 @@ def ad(v, w):
 
         ad(v,w) = -[v,w] = Dv w - Dw v
     """
-    return jacobian_times_vectorfield(v,w) - jacobian_times_vectorfield(w,v)
+    return jacobian_times_vectorfield(v,w,displacement=False) \
+            - jacobian_times_vectorfield(w,v,displacement=False)
 def Ad(phi, v):
     """
     This is Ad(phi,v), the big adjoint action of a deformation phi on a
@@ -39,8 +40,8 @@ def ad_star(v, m):
 
     where div denotes the divergence of a vector field
     """
-    out = jacobian_times_vectorfield(v, m, transpose=True)
-    out += jacobian_times_vectorfield(m, v)     
+    out = jacobian_times_vectorfield(v, m, displacement=False, transpose=True)
+    out += jacobian_times_vectorfield(m, v, displacement=False)
     dv = divergence(v)
     mdv = multiply_imvec(dv, m)
     out += mdv
@@ -64,8 +65,8 @@ def Ad_star(phi, m, displacement=True, out=None):
 # then sharping.
 def ad_dagger(x, y, metric):
     return metric.sharp(ad_star(x, metric.flat(y)))
-def Ad_dagger(phi, y, metric):
-    return metric.sharp(Ad_star(phi, metric.flat(y)))
+def Ad_dagger(phi, y, metric, displacement=True):
+    return metric.sharp(Ad_star(phi, metric.flat(y), displacement=displacement))
 # The sym operator is a negative symmetrized ad_dagger, and is important for
 # computing reduced Jacobi fields.
 # cf. Bullo 1995 or Hinkle 2015 (PhD thesis)
