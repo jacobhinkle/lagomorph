@@ -510,7 +510,8 @@ interp_vectorfield_kernel_2d(int i, int j, Real* out, const Real* g, const Real*
     }
 }
 
-template<BackgroundStrategy backgroundStrategy, int displacement>
+template<BackgroundStrategy backgroundStrategy, int displacement,
+    int broadcast_image=0>
 inline __device__
 void
 interp_image_kernel_2d(int i, int j, Real* out, Real* I, Real* h,
@@ -535,7 +536,8 @@ interp_image_kernel_2d(int i, int j, Real* out, Real* I, Real* h,
         inx += 2*nxy;
         iny += 2*nxy;
         ino += nxy;
-        In += nxy;
+        if (!broadcast_image)
+            In += nxy;
     }
 }
 
@@ -587,13 +589,13 @@ extern "C" {
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
-        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(i, j, out, I, h, nn, nx, ny);
+        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0, 0>(i, j, out, I, h, nn, nx, ny);
     }
     __global__ void interp_displacement_image_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
-        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1>(i, j, out, I, h, nn, nx, ny);
+        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1, 0>(i, j, out, I, h, nn, nx, ny);
     }
     __global__ void interp_vectorfield_2d(Real* out, Real* g, Real* h,
             int nn, int nx, int ny) {
@@ -611,22 +613,13 @@ extern "C" {
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
-        if (i >= nx || j >= ny) return;
-        int nxy = nx*ny;
-        int inx = i*ny + j;
-        int iny = nxy + i*ny + j;
-        int ino = inx;
-        for (int n=0; n < nn; ++n) {
-            Real hx = h[inx];
-            Real hy = h[iny];
-            out[ino] = biLerp<DEFAULT_BACKGROUND_STRATEGY>(I,
-                hx, hy,
-                nx, ny,
-                0.f);
-            inx += 2*nxy;
-            iny += 2*nxy;
-            ino += nxy;
-        }
+        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0, 1>(i, j, out, I, h, nn, nx, ny);
+    }
+    __global__ void interp_displacement_image_bcastI_2d(Real* out, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1, 1>(i, j, out, I, h, nn, nx, ny);
     }
     __global__ void interp_image_bcastI_3d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny, int nz) {
@@ -667,3 +660,4 @@ interp_displacement_image_2d = mod.func("interp_displacement_image_2d")
 interp_vectorfield_2d = mod.func("interp_vectorfield_2d")
 interp_displacement_vectorfield_2d = mod.func("interp_displacement_vectorfield_2d")
 interp_image_bcastI_2d = mod.func("interp_image_bcastI_2d")
+interp_image_bcastI_2d = mod.func("interp_displacement_image_bcastI_2d")
