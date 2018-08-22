@@ -10,7 +10,8 @@ from . import metric_cuda
 from .dtypes import dtype2precision
 
 class FluidMetric(object):
-    def __init__(self, shape, alpha, beta, gamma, allocator=None, precision='single'):
+    def __init__(self, shape, params=[.1, .01, .001], allocator=None,
+            precision='single'):
         """
         This kernel is the Green's function for:
 
@@ -25,13 +26,11 @@ class FluidMetric(object):
         self.complexshape = list(shape)
         self.complexshape[-1] = self.complexshape[-1]//2+1
         self.complexshape = tuple(self.complexshape)
-        self.alpha = float(alpha)
-        self.beta = float(beta)
-        self.gamma = float(gamma)
+        assert len(params)==3
+        self.alpha = float(params[0])
+        self.beta = float(params[1])
+        self.gamma = float(params[2])
         self.luts = None
-        if gamma <= 4*alpha + 2*beta and False:
-            print("WARNING: ill-conditioned kernel. gamma <= "
-                f"4*alpha + 2*beta = {4*alpha + 2*beta}")
         self.dim = len(shape)-2
         if self.dim != 2 and self.dim != 3:
             raise Exception(f"Invalid dimension: {self.dim}")

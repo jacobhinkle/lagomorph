@@ -1,4 +1,5 @@
 from pycuda import gpuarray
+import numpy as np
 
 from .arithmetic import multiply_add, L2
 from .deform import interp_image, imshape2defshape
@@ -6,14 +7,14 @@ from .metric import FluidMetric
 from .shooting import expmap, jacobi_field_backward
 
 
-def matching(source, target, alpha, beta, gamma, width = 256, num_iters=10, step_size=.1, reg_weight=1.0):
-    step_size /= float(width*width)
+def match(source, target, fluid_params, num_iters=10, step_size=.1, reg_weight=1.0):
+    step_size /= float(np.prod(source.shape[1:]))
 
     # initialize velocity field
     m0 = gpuarray.zeros(imshape2defshape(source.shape), dtype=source.dtype,
             allocator=source.allocator, order='C')
     # set up metric
-    metric = FluidMetric(alpha=alpha, beta=beta, gamma=gamma, shape=m0.shape,
+    metric = FluidMetric(shape=m0.shape, params=fluid_params,
             allocator=source.allocator)
 
     for it in range(num_iters):
@@ -43,7 +44,6 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-N", "--num_iters", type=int, default=10, help="Number of iterations of gradient descent")
-    parser.add_argument("-w", "--width", type=int, default=256, help="Image width in pixels")
     parser.add_argument("-a", "--alpha", type=float, default=0.1, help="Fluid kernel parameter")
     parser.add_argument("-b", "--beta", type=float, default=0.01, help="Fluid kernel parameter")
     parser.add_argument("-c", "--gamma", type=float, default=0.01, help="Fluid kernel parameter")
@@ -53,4 +53,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     import pycuda.autoinit # fire up pycuda
-    matching(**vars(args))
+    match(**vars(args))
