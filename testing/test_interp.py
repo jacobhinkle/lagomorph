@@ -82,3 +82,17 @@ def test_interp_splat():
                 assert np.allclose(IhJ, JhI), (f"Splat image does not pass "
                         f"adjoint check [batch_size={bs} dim={dim} precision={prec} dtype={dtype}]: "
                         f"<I\circ h, J>={IhJ} <I, splat h J>={JhI}")
+
+def test_interp_pairdefs():
+    for displacement in [True, False]:
+        for dim in dims:
+            imsh = tuple([1]+[res]*dim)
+            defsh = tuple([1,dim]+[res]*dim)
+            tiles = tuple([2,1]+[1]*dim)
+            for prec, dtype in precs:
+                I = gpuarray.to_gpu(np.random.randn(*imsh).astype(dtype))
+                hhost = np.tile(np.random.randn(*defsh), tiles)
+                h = gpuarray.to_gpu(hhost.astype(dtype))
+                Ih = lm.interp_image(I, h, displacement=displacement).get()
+                assert np.allclose(Ih[0,...], Ih[1,...]), (f"Interp with def bcast "
+                        f" [batch_size={bs} dim={dim} precision={prec} dtype={dtype}]")
