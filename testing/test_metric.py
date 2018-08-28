@@ -16,6 +16,7 @@ dims = [2] # which dimensions to test
 alpha = 0.1
 beta = 0.001
 gamma = 0.01
+fluid_params = [alpha, beta, gamma]
 batch_sizes = [1,10] # which batch sizes to test
 
 def test_fft_random():
@@ -46,7 +47,7 @@ def test_sharp_zero():
         for dim in dims:
             defsh = tuple([bs,dim]+[res]*dim)
             for prec, dtype in precs:
-                metric = lm.FluidMetric(alpha=alpha, beta=beta, gamma=gamma, shape=defsh)
+                metric = lm.FluidMetric(shape=defsh, params=fluid_params, precision=prec)
                 m = gpuarray.zeros(defsh, dtype=dtype)
                 v = metric.sharp(m)
                 vh = v.get()
@@ -59,7 +60,7 @@ def test_flat_zero():
         for dim in dims:
             defsh = tuple([bs,dim]+[res]*dim)
             for prec, dtype in precs:
-                metric = lm.FluidMetric(alpha=alpha, beta=beta, gamma=gamma, shape=defsh)
+                metric = lm.FluidMetric(shape=defsh, params=fluid_params, precision=prec)
                 m = gpuarray.zeros(defsh, dtype=dtype, order='C')
                 v = metric.flat(m)
                 vh = v.get()
@@ -79,7 +80,7 @@ def test_sharp_flat_inverse():
                 assert np.isnan(mh).sum() == 0, f"m contains nans {params}"
                 #mh = np.asarray(np.zeros(defsh), dtype=dtype)
                 m = gpuarray.to_gpu(mh)
-                metric = lm.FluidMetric(alpha=alpha, beta=beta, gamma=gamma, shape=defsh)
+                metric = lm.FluidMetric(shape=defsh, params=fluid_params, precision=prec)
                 v = metric.sharp(m)
                 vh = v.get()
                 assert np.isinf(vh).sum() == 0, f"v contains infs {params}"
