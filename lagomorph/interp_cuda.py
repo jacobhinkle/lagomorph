@@ -348,6 +348,122 @@ biLerp(const Real* img,
                          u         * v2);
 }
 
+// Bilerp function for single array input
+template<BackgroundStrategy backgroundStrategy>
+inline __device__
+void
+biLerp_grad(Real& Ix, Real& gx, Real& gy,
+        const Real* img,
+	Real x, Real y,
+	int sizeX, int sizeY,
+	Real background = 0.f)
+{
+    int floorX = (int)(x);
+    int floorY = (int)(y);
+
+    if (x < 0 && x != (int)(x)) --floorX;
+    if (y < 0 && y != (int)(y)) --floorY;
+
+    // this is not truly ceiling, but floor + 1, which is usually ceiling
+    int ceilX = floorX + 1;
+    int ceilY = floorY + 1;
+
+    Real t = x - floorX;
+    Real u = y - floorY;
+
+    Real oneMinusT = 1.f- t;
+    Real oneMinusU = 1.f- u;
+
+    Real v0, v1, v2, v3;
+    int inside = 1;
+
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrapBackground(floorX, floorY,
+                       ceilX, ceilY,
+                       sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clampBackground(floorX, floorY,
+                        ceilX, ceilY,
+                        sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+
+	if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	   backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+	    background = 0.f;
+	}
+
+        inside = isInside(floorX, floorY,
+                          ceilX, ceilY,
+                          sizeX, sizeY);
+    }else{
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+        Ix = 0.f;
+        gx = 0.f;
+        gy = 0.f;
+	return;
+    }
+
+
+    if (inside){
+        v0 = get_pixel_2d(floorX, floorY, img, sizeX, sizeY);
+        v1 = get_pixel_2d(ceilX, floorY, img, sizeX, sizeY);
+        v2 = get_pixel_2d(ceilX, ceilY, img, sizeX, sizeY);
+        v3 = get_pixel_2d(floorX, ceilY, img, sizeX, sizeY);
+    }else {
+        bool floorXIn = floorX >= 0 && floorX < sizeX;
+        bool floorYIn = floorY >= 0 && floorY < sizeY;
+
+        bool ceilXIn = ceilX >= 0 && ceilX < sizeX;
+        bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
+
+        v0 = (floorXIn && floorYIn) ? get_pixel_2d(floorX, floorY, img, sizeX, sizeY): background;
+        v1 = (ceilXIn && floorYIn)  ? get_pixel_2d(ceilX, floorY, img, sizeX, sizeY): background;
+        v2 = (ceilXIn && ceilYIn)   ? get_pixel_2d(ceilX, ceilY, img, sizeX, sizeY): background;
+        v3 = (floorXIn && ceilYIn)  ? get_pixel_2d(floorX, ceilY, img, sizeX, sizeY): background;
+    }
+
+    //
+    // do bilinear interpolation
+    //
+
+    //
+    // this is the basic bilerp function...
+    //
+    //     h =
+    //       v0 * (1 - t) * (1 - u) +
+    //       v1 * t       * (1 - u) +
+    //       v2 * t       * u       +
+    //       v3 * (1 - t) * u
+    //
+    // The derivative is 
+    //    dh/dx = (-v0) * (1 - u) +
+    //              v1  * (1 - u) +
+    //              v2  * u       +
+    //            (-v3) * u
+    //    dh/dy = (-v0) * (1 - t) +
+    //            (-v1) * t       +
+    //              v2  * t       +
+    //              v3  * (1 - t)
+    //
+    Ix =    oneMinusT * (oneMinusU * v0  +
+                         u         * v3) +
+            t         * (oneMinusU * v1  +
+                         u         * v2);
+    gx = oneMinusU * (v1 - v0) + u * (v2 - v3);
+    gy = oneMinusT * (v3 - v0) + t * (v2 - v1);
+}
+
 // Trilerp function for single array input
 template<BackgroundStrategy backgroundStrategy>
 inline __device__
@@ -541,6 +657,42 @@ interp_image_kernel_2d(int i, int j, Real* out, Real* I, Real* h,
     }
 }
 
+template<BackgroundStrategy backgroundStrategy, int displacement,
+    int broadcast_image=0>
+inline __device__
+void
+interp_grad_kernel_2d(int i, int j, Real* out, Real* g, Real* I, Real* h,
+            int nn, int nx, int ny) {
+    if (i >= nx || j >= ny) return;
+    int nxy = nx*ny;
+    int inx = i*ny + j;
+    int iny = inx + nxy;
+    int inim = inx;
+    Real gx, gy, Ix;
+    Real* In = I;
+    for (int n=0; n < nn; ++n) {
+        Real hx = h[inx];
+        Real hy = h[iny];
+        if (displacement) {
+            hx += static_cast<Real>(i);
+            hy += static_cast<Real>(j);
+        }
+        biLerp_grad<DEFAULT_BACKGROUND_STRATEGY>(Ix, gx, gy,
+            In,
+            hx, hy,
+            nx, ny,
+            0.f);
+        out[inim] = Ix;
+        g[inx] = gx;
+        g[iny] = gy;
+        inx += 2*nxy;
+        iny += 2*nxy;
+        inim += nxy;
+        if (!broadcast_image)
+            In += nxy;
+    }
+}
+
 template<BackgroundStrategy backgroundStrategy, int displacement>
 inline __device__
 void
@@ -597,6 +749,18 @@ extern "C" {
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         interp_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1, 0>(i, j, out, I, h, nn, nx, ny);
     }
+    __global__ void interp_grad_2d(Real* out, Real*g, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        interp_grad_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0, 0>(i, j, out, g, I, h, nn, nx, ny);
+    }
+    __global__ void interp_displacement_grad_2d(Real* out, Real*g, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        interp_grad_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1, 0>(i, j, out, g, I, h, nn, nx, ny);
+    }
     __global__ void interp_vectorfield_2d(Real* out, Real* g, Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -608,6 +772,18 @@ extern "C" {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
         interp_vectorfield_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1>(i, j, out, g, h, nn, nx, ny);
+    }
+    __global__ void interp_zerobg_vectorfield_2d(Real* out, Real* g, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        interp_vectorfield_kernel_2d<BACKGROUND_STRATEGY_ZERO, 0>(i, j, out, g, h, nn, nx, ny);
+    }
+    __global__ void interp_displacement_zerobg_vectorfield_2d(Real* out, const Real* g, const Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        interp_vectorfield_kernel_2d<BACKGROUND_STRATEGY_ZERO, 1>(i, j, out, g, h, nn, nx, ny);
     }
     __global__ void interp_image_bcastI_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
@@ -657,7 +833,11 @@ splat_image_2d = mod.func("splat_image_2d")
 splat_displacement_image_2d = mod.func("splat_displacement_image_2d")
 interp_image_2d = mod.func("interp_image_2d")
 interp_displacement_image_2d = mod.func("interp_displacement_image_2d")
+interp_grad_2d = mod.func("interp_grad_2d")
+interp_displacement_grad_2d = mod.func("interp_displacement_grad_2d")
 interp_vectorfield_2d = mod.func("interp_vectorfield_2d")
 interp_displacement_vectorfield_2d = mod.func("interp_displacement_vectorfield_2d")
+interp_zerobg_vectorfield_2d = mod.func("interp_zerobg_vectorfield_2d")
+interp_displacement_zerobg_vectorfield_2d = mod.func("interp_displacement_zerobg_vectorfield_2d")
 interp_image_bcastI_2d = mod.func("interp_image_bcastI_2d")
 interp_image_bcastI_2d = mod.func("interp_displacement_image_bcastI_2d")
