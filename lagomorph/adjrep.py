@@ -46,7 +46,7 @@ def ad_star(v, m):
     mdv = multiply_imvec(dv, m)
     out += mdv
     return out
-def Ad_star(phi, m, displacement=True, out=None):
+def Ad_star(phi, m, displacement=True, out=None, clamp=False):
     """
     This is Ad^*(phi,m), the big coadjoint action of a deformation phi on a
     vector momentum m. The formula for this is
@@ -56,7 +56,7 @@ def Ad_star(phi, m, displacement=True, out=None):
     where D denotes the Jacobian matrix.
     """
     # First interpolate m
-    mphi = interp_vec(m, phi)
+    mphi = interp_vec(m, phi, displacement=displacement, clamp=clamp)
     ret = jacobian_times_vectorfield(phi, mphi, displacement=displacement, out=out)
     return ret
 # dagger versions of the above coadjoint operators
