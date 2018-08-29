@@ -1,4 +1,5 @@
 from .adjrep import *
+from .affine import *
 from .arithmetic import *
 from .atlas import *
 from .deform import *
