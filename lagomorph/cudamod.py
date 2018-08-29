@@ -2,7 +2,13 @@ from pycuda.compiler import SourceModule, DEFAULT_NVCC_FLAGS
 from pycuda import gpuarray
 import numpy as np
 
+from pkg_resources import resource_filename
+import os
+
 from .checks import ContextCheck, count_nans, count_infs
+
+_defsfile = resource_filename(__name__, "defs.cuh")
+_incdir = os.path.dirname(_defsfile)
 
 class CudaFunc:
     def __init__(self, mod, func_name):
@@ -35,7 +41,7 @@ class CudaFunc:
 class CudaModule:
     def __init__(self, cuda_source, extra_nvcc_flags=[]):
         self.source = cuda_source
-        self.nvcc_flags = DEFAULT_NVCC_FLAGS + ['-std=c++11'] + extra_nvcc_flags
+        self.nvcc_flags = DEFAULT_NVCC_FLAGS + ['-std=c++11',f'-I{_incdir}'] + extra_nvcc_flags
         self.mods = {}
     def compile(self, precision='single'):
         if precision == 'single':
