@@ -100,29 +100,40 @@ def interp_image_affine(I, A, T, out=None, B=None, C=None):
                 precision=prec, block=block, grid=grid)
     return out
 
-def splat_image_affine(I, A, T, out=None, outw=None):
+def splat_image_affine(I, A, T, out=None, outw=None, compute_weights=True):
     if out is None:
         out = gpuarray.empty(shape=I.shape,
                 allocator=I.allocator, dtype=I.dtype, order='C')
-    if outw is None:
-        outw = gpuarray.empty(shape=I.shape,
+    if compute_weights:
+        if outw is None:
+            outw = gpuarray.empty(shape=I.shape,
                 allocator=I.allocator, dtype=I.dtype, order='C')
+        assert out.shape == outw.shape
+        assert out.dtype == outw.dtype
     assert I.shape == out.shape
     # no broadcasting yet
     assert I.shape[0] == A.shape[0]
     assert A.shape[0] == T.shape[0]
-    assert out.shape == outw.shape
-    assert out.dtype == outw.dtype
     prec = dtype2precision(I.dtype)
     dim = I.ndim - 1
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(I.shape[1]/block[0]), math.ceil(I.shape[2]/block[1]), 1)
-        affine_cuda.splat_image_affine_2d(
+        if compute_weights:
+            affine_cuda.splat_image_affine_2d(
                 out, outw,
                 I, A, T,
                 np.int32(I.shape[0]),
                 np.int32(I.shape[1]),
                 np.int32(I.shape[2]),
                 precision=prec, block=block, grid=grid)
-    return out, outw
+            return out, outw
+        else:
+            affine_cuda.splat_image_affine_noweights_2d(
+                out,
+                I, A, T,
+                np.int32(I.shape[0]),
+                np.int32(I.shape[1]),
+                np.int32(I.shape[2]),
+                precision=prec, block=block, grid=grid)
+            return out

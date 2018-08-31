@@ -4,7 +4,7 @@
 #include "extrap.cuh"
 #include "defs.cuh"
 
-template<BackgroundStrategy backgroundStrategy>
+template<BackgroundStrategy backgroundStrategy, int write_weights>
 inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt,
@@ -34,11 +34,12 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
 	return;
     }
     int nid = i * h + j;
-    atomicAdd(&d_ww[nid], ww);
+    if (write_weights)
+        atomicAdd(&d_ww[nid], ww);
     atomicAdd(&d_wd[nid], ww*mass);
 }
 
-template<BackgroundStrategy backgroundStrategy>
+template<BackgroundStrategy backgroundStrategy, int write_weights>
 inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt, int zInt,
@@ -75,11 +76,12 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
 	return 0.f;
     }
     int nid = (xInt * h + yInt) * l + zInt;
-    atomicAdd(&d_ww[nid], ww);
+    if (write_weights)
+        atomicAdd(&d_ww[nid], ww);
     atomicAdd(&d_wd[nid], ww*mass);
 }
 
-template<BackgroundStrategy backgroundStrategy>
+template<BackgroundStrategy backgroundStrategy, int write_weights>
 inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
         Real mass, Real x, Real y,
         int w, int h)
@@ -95,14 +97,14 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
 
     for (int xi=xInt;xi<xInt+2;xi++) {
         for (int yi=yInt;yi<yInt+2;yi++) {
-            splat_neighbor<backgroundStrategy>(d_wd, d_ww, dx * dy,
+            splat_neighbor<backgroundStrategy, write_weights>(d_wd, d_ww, dx * dy,
                 mass, xi, yi, w, h);
             dy = 1.f-dy;
         }
         dx = 1.f-dx;
     }
 }
-template<BackgroundStrategy backgroundStrategy>
+template<BackgroundStrategy backgroundStrategy, int write_weights>
 inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
         Real mass, Real x, Real y, Real z,
         int w, int h, int l)
@@ -122,7 +124,7 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
     for (int xi=xInt;xi<xInt+2;xi++) {
         for (int yi=yInt;yi<yInt+2;yi++) {
             for (int zi=zInt;zi<zInt+2;zi++) {
-                splat_neighbor<backgroundStrategy>(d_wd, d_ww, dx * dy * dz,
+                splat_neighbor<backgroundStrategy, write_weights>(d_wd, d_ww, dx * dy * dz,
                     mass, xi, yi, zi, w, h, l);
                 dz = 1.f-dz;
             }

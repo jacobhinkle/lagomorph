@@ -318,7 +318,7 @@ interp_image_affine_kernel_2d(Real* out,
     }
 }
 
-template<BackgroundStrategy backgroundStrategy>
+template<BackgroundStrategy backgroundStrategy, int write_weights>
 inline __device__
 void
 splat_image_affine_kernel_2d(Real* out, Real* w,
@@ -349,7 +349,7 @@ splat_image_affine_kernel_2d(Real* out, Real* w,
         hx = An[0]*fi + An[1]*fj + Tn[0] + ox;
         hy = An[2]*fi + An[3]*fj + Tn[1] + oy;
 
-        atomicSplat<backgroundStrategy>(outn, wn,
+        atomicSplat<backgroundStrategy, write_weights>(outn, wn,
             In[ix], hx, hy, nx, ny);
 
         In += nxy;
@@ -411,8 +411,14 @@ extern "C" {
     __global__ void splat_image_affine_2d(Real* out, Real* w,
             Real* I, Real* A, Real* T,
             int nn, int nx, int ny) {
-        splat_image_affine_kernel_2d<DEFAULT_BACKGROUND_STRATEGY>(
+        splat_image_affine_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1>(
             out, w, I, A, T, nn, nx, ny);
+    }
+    __global__ void splat_image_affine_noweights_2d(Real* out,
+            Real* I, Real* A, Real* T,
+            int nn, int nx, int ny) {
+        splat_image_affine_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(
+            out, NULL, I, A, T, nn, nx, ny);
     }
 }
 ''', extra_nvcc_flags=[
@@ -426,3 +432,4 @@ interp_image_affine_contrast_2d = mod.func("interp_image_affine_contrast_2d")
 interp_image_affine_bcastI_2d = mod.func("interp_image_affine_bcastI_2d")
 interp_image_affine_bcastI_contrast_2d = mod.func("interp_image_affine_bcastI_contrast_2d")
 splat_image_affine_2d = mod.func("splat_image_affine_2d")
+splat_image_affine_noweights_2d = mod.func("splat_image_affine_noweights_2d")

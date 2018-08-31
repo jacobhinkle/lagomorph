@@ -54,7 +54,7 @@ def interp_grad_kernel(out, grad, I, h, displacement=True):
     else:
         raise Exception(f"Unsupported dimension: {dim}")
 
-def splat_image_kernel(out, outweights, I, h, displacement=True):
+def splat_image_kernel(out, outweights, I, h, displacement=True, compute_weights=True):
     assert I.ndim+1 == h.ndim, "Dimensions of I and h must match"
     assert out.dtype == I.dtype and I.dtype == h.dtype, "dtypes of all args must match"
     prec = dtype2precision(out.dtype)
@@ -62,15 +62,26 @@ def splat_image_kernel(out, outweights, I, h, displacement=True):
     if dim == 2:
         block = (32,32,1)
         grid = (math.ceil(I.shape[1]/block[0]), math.ceil(I.shape[2]/block[1]), 1)
-        if displacement:
-            f = ic.splat_displacement_image_2d
+        if compute_weights:
+            if displacement:
+                f = ic.splat_displacement_image_2d
+            else:
+                f = ic.splat_image_2d
+            f(out, outweights, I, h,
+                    np.int32(h.shape[0]),
+                    np.int32(h.shape[2]),
+                    np.int32(h.shape[3]),
+                    precision=prec, block=block, grid=grid)
         else:
-            f = ic.splat_image_2d
-        f(out, outweights, I, h,
-                np.int32(h.shape[0]),
-                np.int32(h.shape[2]),
-                np.int32(h.shape[3]),
-                precision=prec, block=block, grid=grid)
+            if displacement:
+                f = ic.splat_displacement_image_noweights_2d
+            else:
+                f = ic.splat_image_noweights_2d
+            f(out, I, h,
+                    np.int32(h.shape[0]),
+                    np.int32(h.shape[2]),
+                    np.int32(h.shape[3]),
+                    precision=prec, block=block, grid=grid)
     elif dim == 3:
         raise NotImplementedError("not implemented")
     else:
@@ -193,7 +204,7 @@ def interp_grad(I, h, displacement=True, out=None, outgrad=None):
         interp_grad_kernel(out, outgrad, I, h, displacement=displacement)
     return out, outgrad
 
-def splat_image(I, h, displacement=True, out=None, outweights=None):
+def splat_image(I, h, displacement=True, out=None, outweights=None, compute_weights=True):
     """
     Interpolate an image along a vector field to compute I(h(x))
 
@@ -211,11 +222,13 @@ def splat_image(I, h, displacement=True, out=None, outweights=None):
     assert h.shape[1] == dim, "h must have same number channels as dim"
     if out is None:
         out = gpuarray.zeros_like(I)
-    if outweights is None:
-        outweights = gpuarray.zeros_like(I)
+    if compute_weights:
+        if outweights is None:
+            outweights = gpuarray.zeros_like(I)
     assert out.shape == defshape2imshape(h.shape), "Output must have same domain as h"
     assert I.shape[0] == h.shape[0], "Number non-broadcast image and deformation dimensions must match"
-    splat_image_kernel(out, outweights, I, h, displacement=displacement)
+    splat_image_kernel(out, outweights, I, h, displacement=displacement,
+            compute_weights=compute_weights)
     return out, outweights
 
 def interp_vec(g, h, displacement=True, clamp=True, out=None):

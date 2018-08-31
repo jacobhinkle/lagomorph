@@ -111,7 +111,7 @@ interp_grad_kernel_2d(int i, int j, Real* out, Real* g, Real* I, Real* h,
     }
 }
 
-template<BackgroundStrategy backgroundStrategy, int displacement>
+template<BackgroundStrategy backgroundStrategy, int displacement, int write_weights>
 inline __device__
 void
 splat_image_kernel_2d(int i, int j, Real* d_wd, Real* d_ww, Real* I, Real* h,
@@ -130,7 +130,7 @@ splat_image_kernel_2d(int i, int j, Real* d_wd, Real* d_ww, Real* I, Real* h,
             hx += static_cast<Real>(i);
             hy += static_cast<Real>(j);
         }
-        atomicSplat<DEFAULT_BACKGROUND_STRATEGY>(dn, wn,
+        atomicSplat<DEFAULT_BACKGROUND_STRATEGY, write_weights>(dn, wn,
             I[ino], hx, hy, nx, ny);
         inx += 2*nxy;
         iny += 2*nxy;
@@ -145,15 +145,29 @@ extern "C" {
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
-        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(i, j,
+        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0, 1>(i, j,
             splats, weights, I, h, nn, nx, ny);
     }
     __global__ void splat_displacement_image_2d(Real* d_wd, Real* d_ww, Real* I, Real* h,
             int nn, int nx, int ny) {
         int i = blockDim.x * blockIdx.x + threadIdx.x;
         int j = blockDim.y * blockIdx.y + threadIdx.y;
-        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1>(i, j,
+        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1, 1>(i, j,
             d_wd, d_ww, I, h, nn, nx, ny);
+    }
+    __global__ void splat_image_noweights_2d(Real* splats, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0, 0>(i, j,
+            splats, NULL, I, h, nn, nx, ny);
+    }
+    __global__ void splat_displacement_image_noweights_2d(Real* d_wd, Real* I, Real* h,
+            int nn, int nx, int ny) {
+        int i = blockDim.x * blockIdx.x + threadIdx.x;
+        int j = blockDim.y * blockIdx.y + threadIdx.y;
+        splat_image_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 1, 0>(i, j,
+            d_wd, NULL, I, h, nn, nx, ny);
     }
     __global__ void interp_image_2d(Real* out, Real* I, Real* h,
             int nn, int nx, int ny) {
@@ -249,6 +263,8 @@ extern "C" {
         '-DDEFAULT_BACKGROUND_STRATEGY=BACKGROUND_STRATEGY_CLAMP'])
 splat_image_2d = mod.func("splat_image_2d")
 splat_displacement_image_2d = mod.func("splat_displacement_image_2d")
+splat_image_noweights_2d = mod.func("splat_image_noweights_2d")
+splat_displacement_image_noweights_2d = mod.func("splat_displacement_image_noweights_2d")
 interp_image_2d = mod.func("interp_image_2d")
 interp_displacement_image_2d = mod.func("interp_displacement_image_2d")
 interp_grad_2d = mod.func("interp_grad_2d")
