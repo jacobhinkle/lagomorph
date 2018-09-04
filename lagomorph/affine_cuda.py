@@ -268,8 +268,8 @@ template<BackgroundStrategy backgroundStrategy, int broadcast_I, int use_contras
 inline __device__
 void
 interp_image_affine_kernel_2d(Real* out,
-        Real* I, Real* A, Real* T,
-        Real* B, Real* C,
+        const Real* I, const Real* A, const Real* T,
+        const Real* B, const Real* C,
         int nn, int nx, int ny) {
     int blockstartx = blockDim.x * blockIdx.x;
     int blockstarty = blockDim.y * blockIdx.y;
@@ -315,6 +315,75 @@ interp_image_affine_kernel_2d(Real* out,
             Bn++;
             Cn++;
         }
+    }
+}
+
+template<BackgroundStrategy backgroundStrategy, int use_contrast>
+__device__
+void
+affine_atlas_jacobi_kernel(Real* sse, Real* num, Real* denom,
+        const Real* I, const Real* J, const Real* A, const Real* T,
+        const Real* B, const Real* C,
+        int nn, int nx, int ny) {
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+    int j = blockDim.y * blockIdx.y + threadIdx.y;
+    // thread number within this block
+    int tid = threadIdx.x*blockDim.y + threadIdx.y;
+    __shared__ Real sses[MAX_THREADS_PER_BLOCK];
+    int nxy = nx*ny;
+    const Real* Jn = J; // pointer to current image J
+    const Real* An = A; // pointer to current matrix A
+    const Real* Tn = T; // pointer to current vector T
+    // center of rotation
+    Real ox = .5*static_cast<Real>(nx-1);
+    Real oy = .5*static_cast<Real>(ny-1);
+    Real fi=static_cast<Real>(i)-ox;
+    Real fj=static_cast<Real>(j)-oy;
+    Real hx, hy;
+    Real sset = 0.0f;
+    if (i < nx && j < ny) {
+        for (int n=0; n < nn; ++n) {
+            // apply affine transform to map i, j to lookup point
+            hx = An[0]*fi + An[1]*fj + Tn[0] + ox;
+            hy = An[2]*fi + An[3]*fj + Tn[1] + oy;
+
+            if (use_contrast)
+                sset += atlas_jacobi_point<backgroundStrategy>(num, denom, I, Jn,
+                    B[n], C[n], i, j, hx, hy, nx, ny);
+            else
+                sset += atlas_jacobi_point<backgroundStrategy>(num, denom, I, Jn,
+                    (Real)1.0, (Real)0.0, i, j, hx, hy, nx, ny);
+
+            Jn += nxy;
+            An += 4;
+            Tn += 2;
+        }
+    }
+    sses[tid] = sset;
+    // reduce this block of sses
+    __syncthreads();
+    static_assert(MAX_THREADS_PER_BLOCK <= 1024, "MAX_THREADS_PER_BLOCK > 1024 not supported");
+    // ensure counterpart in second half of arrays is not outside
+    // pixel domain
+#define REDUCE_SSE(N) \
+    if (MAX_THREADS_PER_BLOCK > N) { \
+        if (tid < N) { \
+            sses[tid] += sses[tid + N]; \
+        } \
+        __syncthreads(); \
+    }
+    REDUCE_SSE(512)
+    REDUCE_SSE(256)
+    REDUCE_SSE(128)
+    REDUCE_SSE(64)
+    REDUCE_SSE(32)
+    REDUCE_SSE(16)
+    REDUCE_SSE(8)
+    REDUCE_SSE(4)
+    REDUCE_SSE(2)
+    REDUCE_SSE(1)
+    if (tid == 0) {
+        atomicAdd(sse, sses[0]);
     }
 }
 
@@ -420,6 +489,19 @@ extern "C" {
         splat_image_affine_kernel_2d<DEFAULT_BACKGROUND_STRATEGY, 0>(
             out, NULL, I, A, T, nn, nx, ny);
     }
+    __global__ void affine_atlas_jacobi_2d(Real* sse, Real* num, Real* denom,
+        const Real* I, const Real* J, const Real* A, const Real* T,
+        int nn, int nx, int ny) {
+        affine_atlas_jacobi_kernel<DEFAULT_BACKGROUND_STRATEGY, 0>(
+            sse, num, denom, I, J, A, T, (Real*)NULL, (Real*)NULL, nn, nx, ny);
+    }
+    __global__ void affine_atlas_jacobi_contrast_2d(Real* sse, Real* num, Real* denom,
+        const Real* I, const Real* J, const Real* A, const Real* T,
+        const Real* B, const Real* C,
+        int nn, int nx, int ny) {
+        affine_atlas_jacobi_kernel<DEFAULT_BACKGROUND_STRATEGY, 1>(
+            sse, num, denom, I, J, A, T, B, C, nn, nx, ny);
+    }
 }
 ''', extra_nvcc_flags=[
         '-DDEFAULT_BACKGROUND_STRATEGY=BACKGROUND_STRATEGY_CLAMP'])
@@ -433,3 +515,5 @@ interp_image_affine_bcastI_2d = mod.func("interp_image_affine_bcastI_2d")
 interp_image_affine_bcastI_contrast_2d = mod.func("interp_image_affine_bcastI_contrast_2d")
 splat_image_affine_2d = mod.func("splat_image_affine_2d")
 splat_image_affine_noweights_2d = mod.func("splat_image_affine_noweights_2d")
+affine_atlas_jacobi_2d = mod.func("affine_atlas_jacobi_2d")
+affine_atlas_jacobi_contrast_2d = mod.func("affine_atlas_jacobi_contrast_2d")

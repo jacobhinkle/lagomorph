@@ -1,7 +1,7 @@
 #ifndef DEFS_CUH
 #define DEFS_CUH
 
-const unsigned int MAX_THREADS_PER_BLOCK = 1024;
+const unsigned int MAX_THREADS_PER_BLOCK = 512;
 
 // used in both interp and diff code
 enum BackgroundStrategy { BACKGROUND_STRATEGY_PARTIAL_ID,

@@ -134,6 +134,125 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
     }
 }
 
+// This computes the loss and gradient of the image match at a point with
+// respect to the base image I. The gradient is splatted back into two images:
+// num and denom. Denom holds the Jacobi preconditioner, and num holds the
+// unconditioned gradient. To do a Jacobi preconditioned gradient step or a
+// Jacobi iteration step, all that is needed is to divide num by denom after
+// this kernel has completed. The squared difference between I(x,y) *B + C and
+// J(i,j) is returned.
+template<BackgroundStrategy backgroundStrategy>
+inline __device__
+Real
+atlas_jacobi_point(Real* num, Real* denom,
+        const Real* I,
+        const Real* J,
+        Real B, Real C,
+        int i, int j,
+        Real x, Real y,
+        int sizeX, int sizeY,
+        Real background = 0.f) {
+    int floorX = (int)(x);
+    int floorY = (int)(y);
+
+    if (x < 0 && x != (int)(x)) --floorX;
+    if (y < 0 && y != (int)(y)) --floorY;
+
+    // this is not truly ceiling, but floor + 1, which is usually ceiling
+    int ceilX = floorX + 1;
+    int ceilY = floorY + 1;
+
+    Real t = x - floorX;
+    Real u = y - floorY;
+
+    Real oneMinusT = 1.f- t;
+    Real oneMinusU = 1.f- u;
+
+    Real v0, v1, v2, v3;
+    Real w0, w1, w2, w3; // interp weights
+    int ix0, ix1, ix2, ix3; // indices of corners
+    Real diff;
+    int inside = 1;
+
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrapBackground(floorX, floorY,
+                       ceilX, ceilY,
+                       sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clampBackground(floorX, floorY,
+                        ceilX, ceilY,
+                        sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+
+        if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+           backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+            background = 0.f;
+        }
+
+        inside = isInside(floorX, floorY,
+                          ceilX, ceilY,
+                          sizeX, sizeY);
+    } else {
+        // unknown background strategy, don't allow compilation
+        static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                          "Unknown background strategy");
+        return;
+    }
+
+    if (inside) {
+        ix0 = floorX*sizeY + floorY;
+        ix1 = ceilX *sizeY + floorY;
+        ix2 = ceilX *sizeY + ceilY;
+        ix3 = floorX*sizeY + ceilY;
+
+        v0 = I[ix0];
+        v1 = I[ix1];
+        v2 = I[ix2];
+        v3 = I[ix3];
+
+        w0 = (oneMinusT * oneMinusU)*B;
+        w1 = (t         * oneMinusU)*B;
+        w2 = (t         * u        )*B;
+        w3 = (oneMinusT * u        )*B;
+
+        // point image difference
+        diff = (w0*v0 + w1*v1 + w2*v2 + w3*v3) + C - J[i*sizeY + j];
+
+        // set the denominator which is the diagonal of the Hessian
+        atomicAdd(&denom[ix0], w0*w0);
+        atomicAdd(&denom[ix1], w1*w1);
+        atomicAdd(&denom[ix2], w2*w2);
+        atomicAdd(&denom[ix3], w3*w3);
+        // splat B*Ix+C - Ji into num
+        atomicAdd(&num[ix0], w0*diff);
+        atomicAdd(&num[ix1], w1*diff);
+        atomicAdd(&num[ix2], w2*diff);
+        atomicAdd(&num[ix3], w3*diff);
+    } else {
+        bool floorXIn = floorX >= 0 && floorX < sizeX;
+        bool floorYIn = floorY >= 0 && floorY < sizeY;
+
+        bool ceilXIn = ceilX >= 0 && ceilX < sizeX;
+        bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
+
+        v0 = (floorXIn && floorYIn) ? get_pixel_2d(floorX, floorY, I, sizeX, sizeY): background;
+        v1 = (ceilXIn && floorYIn)  ? get_pixel_2d(ceilX, floorY, I, sizeX, sizeY): background;
+        v2 = (ceilXIn && ceilYIn)   ? get_pixel_2d(ceilX, ceilY, I, sizeX, sizeY): background;
+        v3 = (floorXIn && ceilYIn)  ? get_pixel_2d(floorX, ceilY, I, sizeX, sizeY): background;
+    }
+    return diff*diff;
+}
+
+
 // Bilerp function for single array input
 template<BackgroundStrategy backgroundStrategy>
 inline __device__
