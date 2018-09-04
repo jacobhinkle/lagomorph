@@ -42,9 +42,3 @@ deformed atlas, and wrap that in a tensorflow or pytorch Tensor type so you can
 use your most familiar system to optimize those or combine them with deep neural
 networks.
 
-# TODO List
-
-- Simple vector momentum shooting registration demo
-- Test suite
-- Vector momentum atlas building
-- Complete the 3D versions of above methods

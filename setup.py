@@ -1,7 +1,7 @@
 from setuptools import setup
 setup(
     name="lagomorph",
-    version="0.1",
+    version="0.1.0",
     packages=['lagomorph'],
     include_package_data=True,
     setup_requires=['pytest-runner'],
