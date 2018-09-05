@@ -193,9 +193,10 @@ def atlas_update_base_image_affine(J, A, T, B=None, C=None, I=None,
             raise
     def allreduce_gpu(xd):
         # divide by a biggish constant to prevent overflows
-        scale = 1./(np.prod(J.shape[1:]))
-        xh = np.ascontiguousarray(xd.get().ravel())*scale
+        scale = np.prod(J.shape[1:])
+        xh = np.ascontiguousarray(xd.get().ravel())/scale
         xr = comm.allreduce(sendobj=xh, op=MPI.SUM)
+        xr *= scale
         xd.set(xr.reshape(xd.shape))
     if I is None:
         Ish = tuple([1] + list(J.shape[1:]))
@@ -225,21 +226,19 @@ def atlas_update_base_image_affine(J, A, T, B=None, C=None, I=None,
             # allreduce g and sumw
             allreduce_gpu(num)
             allreduce_gpu(denom)
+            allreduce_gpu(ssed)
         # Add the l2 regularization term
+        multiply_add(I, l2_weight, out=num)
         denom += l2_weight
         loss = .5*(ssed.get()[0] + l2_weight*L2(I,I))
         losses.append(loss)
-        if loss == lastloss:
-            print(f"Base image updates converged after {it+1} iterations")
-            return I
         lastloss = loss
         #print(f"it={it} loss={loss}")
-        multiply_add(I, l2_weight, out=num)
         num /= denom    
         multiply_add(num, -step_size, out=I)
     return I, losses
 
-def atlas_update_contrast_affine(I, J, A, T, B=None, C=None):
+def atlas_update_contrast_affine(I, J, A, T, B=None, C=None, use_mpi=False):
     nxy = J.shape[1]*J.shape[2]
     Jh = J.get()
     sumJ = Jh.sum(axis=(1,2)) # precompute sum of each image
@@ -248,11 +247,21 @@ def atlas_update_contrast_affine(I, J, A, T, B=None, C=None):
     phiIJ = (phiI*Jh).sum(axis=(1,2))
     L2phiI = (phiI**2).sum(axis=(1,2))
     denom = np.clip(L2phiI*nxy - sumphiI**2, .01, None)
-    Bh = np.clip((nxy*phiIJ - sumJ*sumphiI)/denom, .01, None)
+    Bh = (nxy*phiIJ - sumJ*sumphiI)/denom
     Ch = (L2phiI*sumJ - sumphiI*phiIJ)/denom
-    Bh = Bh - np.mean(Bh) + 1.
-    meanCh = np.mean(Ch)
-    Ch -= meanCh
+    if use_mpi:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+        sumBh = comm.allreduce(sendobj=Bh.sum(), op=MPI.SUM)
+        sumCh = comm.allreduce(sendobj=Ch.sum(), op=MPI.SUM)
+        nsubjects = comm.allreduce(sendobj=np.ones_like(Ch).sum(), op=MPI.SUM)
+        meanBh = sumBh/nsubjects
+        meanCh = sumCh/nsubjects
+    else:
+        meanBh = np.mean(Bh)
+        meanCh = np.mean(Ch)
+    #Bh -= meanBh - 1.0
+    #Ch -= meanCh
     if B is None:
         B = gpuarray.to_gpu(Bh.astype(I.dtype), allocator=I.allocator)
     else:
@@ -285,10 +294,14 @@ def atlas_affine(J, num_iters=5, N_affine=100, step_size_A=1e-10,
     else:
         I, lossesI = atlas_update_base_image_affine(J, A, T, B=B, C=C, l2_weight=image_l2, I=I)
         losses.extend(lossesI)
+    from datetime import datetime
+    tstart = datetime.now()
     for it in range(num_iters):
+        tstart_it = datetime.now()
         for _ in range(1):
             if contrast:
-                B, C = atlas_update_contrast_affine(I, J, A, T, B=B, C=C)
+                B, C = atlas_update_contrast_affine(I, J, A, T, B=B, C=C,
+                        use_mpi=use_mpi)
             I, lossesI = atlas_update_base_image_affine(J, A, T, I=I, B=B, C=C,
                     use_mpi=use_mpi, l2_weight=image_l2)
             losses.extend(lossesI)
@@ -299,8 +312,11 @@ def atlas_affine(J, num_iters=5, N_affine=100, step_size_A=1e-10,
         if use_mpi:
             comm = MPI.COMM_WORLD
             # reduce the losses too
-            losses_pose = comm.allreduce(losses_pose, op=MPI.SUM)
+            losses_pose = list(comm.allreduce(np.asarray(losses_pose), op=MPI.SUM))
         losses.extend(losses_pose)
-        if len(losses_pose) > 1:
-            print(f"Iter {it+1} of {num_iters}. Loss went from {losses_pose[0]:15.2f} to {losses_pose[-1]:15.2f}")
+        if len(losses_pose) > 1 and (not use_mpi or MPI.COMM_WORLD.Get_rank() == 0):
+            tnow = datetime.now()
+            print(f"Iter {it+1} of {num_iters}. Loss went from {losses_pose[0]:15.2f} to {losses_pose[-1]:15.2f} iter: {tnow-tstart_it} elapsed: {tnow-tstart}")
+            import sys
+            sys.stdout.flush()
     return I, A, T, B, C, losses
