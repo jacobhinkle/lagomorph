@@ -1,5 +1,4 @@
 from pycuda import gpuarray
-from matplotlib import pyplot as plt
 import numpy as np
 
 from .deform import identity
@@ -7,6 +6,7 @@ from .deform import identity
 def gridplot(u, Nx=64, Ny=64, displacement=True, color='black', **kwargs):
     """Given a displacement field, plot a displaced grid"""
     assert u.shape[0] == 1, "Only send one deformation at a time"
+    from matplotlib import pyplot as plt
     if isinstance(u, gpuarray.GPUArray):
         u = u.get()
     if Nx is None:
@@ -39,6 +39,7 @@ def quiver(u, Nx=32, Ny=32, color='black', units='xy', angles='xy', scale=1.0, *
     """Given a displacement field, plot a quiver of vectors"""
     assert u.shape[0] == 1, "Only send one deformation at a time"
     assert u.ndim == 4, "Only 2D deformations can use quiver()"
+    from matplotlib import pyplot as plt
     if isinstance(u, gpuarray.GPUArray):
         u = u.get()
     if Nx is None:
