@@ -205,7 +205,7 @@ atlas_jacobi_point(Real* num, Real* denom,
                   backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
                   backgroundStrategy== BACKGROUND_STRATEGY_VAL,
                           "Unknown background strategy");
-        return;
+        return 0;
     }
 
     if (inside) {
@@ -469,6 +469,128 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
                          u         * v2);
     gx = oneMinusU * (v1 - v0) + u * (v2 - v3);
     gy = oneMinusT * (v3 - v0) + t * (v2 - v1);
+}
+
+// Bilerp function that also computes the gradient and Hessian
+template<BackgroundStrategy backgroundStrategy>
+inline __device__
+void
+biLerp_grad_hessian(Real& Ix, Real& gx, Real& gy,
+    Real& Hxy,
+    const Real* img,
+	Real x, Real y,
+	int sizeX, int sizeY,
+	Real background = 0.f)
+{
+    int floorX = (int)(x);
+    int floorY = (int)(y);
+
+    if (x < 0 && x != (int)(x)) --floorX;
+    if (y < 0 && y != (int)(y)) --floorY;
+
+    // this is not truly ceiling, but floor + 1, which is usually ceiling
+    int ceilX = floorX + 1;
+    int ceilY = floorY + 1;
+
+    Real t = x - floorX;
+    Real u = y - floorY;
+
+    Real oneMinusT = 1.f- t;
+    Real oneMinusU = 1.f- u;
+
+    Real v0, v1, v2, v3;
+    int inside = 1;
+
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrapBackground(floorX, floorY,
+                       ceilX, ceilY,
+                       sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clampBackground(floorX, floorY,
+                        ceilX, ceilY,
+                        sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+
+	if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	   backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+	    background = 0.f;
+	}
+
+        inside = isInside(floorX, floorY,
+                          ceilX, ceilY,
+                          sizeX, sizeY);
+    }else{
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+        Ix = 0.f;
+        gx = 0.f;
+        gy = 0.f;
+        Hxy = 0.f;
+        return;
+    }
+
+
+    if (inside){
+        v0 = get_pixel_2d(floorX, floorY, img, sizeX, sizeY);
+        v1 = get_pixel_2d(ceilX, floorY, img, sizeX, sizeY);
+        v2 = get_pixel_2d(ceilX, ceilY, img, sizeX, sizeY);
+        v3 = get_pixel_2d(floorX, ceilY, img, sizeX, sizeY);
+    }else {
+        bool floorXIn = floorX >= 0 && floorX < sizeX;
+        bool floorYIn = floorY >= 0 && floorY < sizeY;
+
+        bool ceilXIn = ceilX >= 0 && ceilX < sizeX;
+        bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
+
+        v0 = (floorXIn && floorYIn) ? get_pixel_2d(floorX, floorY, img, sizeX, sizeY): background;
+        v1 = (ceilXIn && floorYIn)  ? get_pixel_2d(ceilX, floorY, img, sizeX, sizeY): background;
+        v2 = (ceilXIn && ceilYIn)   ? get_pixel_2d(ceilX, ceilY, img, sizeX, sizeY): background;
+        v3 = (floorXIn && ceilYIn)  ? get_pixel_2d(floorX, ceilY, img, sizeX, sizeY): background;
+    }
+
+    //
+    // do bilinear interpolation
+    //
+
+    //
+    // this is the basic bilerp function...
+    //
+    //     h =
+    //       v0 * (1 - t) * (1 - u) +
+    //       v1 * t       * (1 - u) +
+    //       v2 * t       * u       +
+    //       v3 * (1 - t) * u
+    //
+    // The derivative is 
+    //    dh/dx = dh/dt = (-v0) * (1 - u) +
+    //                      v1  * (1 - u) +
+    //                      v2  * u       +
+    //                      (-v3) * u
+    //    dh/dy = dh/du = (-v0) * (1 - t) +
+    //                    (-v1) * t       +
+    //                      v2  * t       +
+    //                      v3  * (1 - t)
+    // The second derivative is 
+    //    d^2 h/dx^2 = d^2 h/dy^2 = 0
+    //    d^2 h/ dx dy = v0 - v1 + v2 - v3
+    //
+    Ix =    oneMinusT * (oneMinusU * v0  +
+                         u         * v3) +
+            t         * (oneMinusU * v1  +
+                         u         * v2);
+    gx = oneMinusU * (v1 - v0) + u * (v2 - v3);
+    gy = oneMinusT * (v3 - v0) + t * (v2 - v1);
+    Hxy = v0 - v1 + v2 - v3;
 }
 
 // Trilerp function for single array input

@@ -61,6 +61,76 @@ def affine_gradient(I, J, A, T, B=None, C=None, outdA=None, outdT=None):
         loss = 0.5*loss.get()[0]
     return outdA, outdT, loss
 
+def affine_gradient_hessian(I, J, A, T, B=None, C=None, outdA=None, outdT=None, outH=None):
+    """
+    Compute the loss, gradient, and Hessian of the L2 loss function for affine
+    image matching (with or without image broadcasting).
+
+    The gradients with respect to A and T are provided separately, and the
+    Hessian is provided as an n-by-21 matrix in row-contiguous order with A
+    derivatives before T derivatives.
+
+    **NOTE** that we do not compute derivatives with the contrast parameters B
+    and C.
+    """
+    if outdA is None:
+        outdA = gpuarray.empty(shape=A.shape,
+                allocator=A.allocator, dtype=A.dtype, order='C')
+    if outdT is None:
+        outdT = gpuarray.empty(shape=T.shape,
+                allocator=T.allocator, dtype=T.dtype, order='C')
+    if outH is None:
+        outH = gpuarray.empty(shape=(A.shape[0], 21),
+                allocator=T.allocator, dtype=A.dtype, order='C')
+    use_contrast = B is not None
+    if use_contrast:
+        assert C is not None
+        assert B.shape == C.shape
+        assert B.ndim == 1
+    assert I.shape[1:] == J.shape[1:]
+    assert A.shape == outdA.shape
+    assert T.shape == outdT.shape
+    assert A.shape[0] == T.shape[0]
+    assert A.shape[0] == outH.shape[0]
+    prec = dtype2precision(I.dtype)
+    dim = I.ndim - 1
+    outdA.fill(0)
+    outdT.fill(0)
+    outH.fill(0)
+    if dim == 2:
+        block = (12,32,1)
+        nn = max(I.shape[0], J.shape[0])
+        grid = (math.ceil(I.shape[1]/block[0]), math.ceil(I.shape[2]/block[1]), 1)
+        loss = gpuarray.zeros(shape=(1,), allocator=I.allocator, dtype=I.dtype, order='C')
+        if use_contrast:
+            if I.shape[0] == J.shape[0]:
+                f = affine_cuda.affine_grad_hessian_contrast_2d
+            elif I.shape[0] == 1 and J.shape[0] > 1:
+                f = affine_cuda.affine_grad_hessian_bcastI_contrast_2d
+            else:
+                raise NotImplementedError("Only base image broadcasting is supported")
+            f(outdA, outdT, outH, loss,
+                I, J, A, T, B, C,
+                np.int32(nn),
+                np.int32(I.shape[1]),
+                np.int32(I.shape[2]),
+                precision=prec, block=block, grid=grid)
+        else:
+            if I.shape[0] == J.shape[0]:
+                f = affine_cuda.affine_grad_hessian_2d
+            elif I.shape[0] == 1 and J.shape[0] > 1:
+                f = affine_cuda.affine_grad_hessian_bcastI_2d
+            else:
+                raise NotImplementedError("Only base image broadcasting is supported")
+            f(outdA, outdT, outH, loss,
+                I, J, A, T,
+                np.int32(nn),
+                np.int32(I.shape[1]),
+                np.int32(I.shape[2]),
+                precision=prec, block=block, grid=grid)
+        loss = 0.5*loss.get()[0]
+    return outdA, outdT, outH, loss
+
 def interp_image_affine(I, A, T, out=None, B=None, C=None):
     nn = max(I.shape[0], A.shape[0])
     use_contrast = B is not None
@@ -179,6 +249,133 @@ def match_affine(I, J, num_iters=1000, step_size_A=1e-10, step_size_T=1e-7, diag
             dA.set(dAh)
         multiply_add(dA, -step_size_A, out=A)
         multiply_add(dT, -step_size_T, out=T)
+        losses.append(loss)
+    return A, T, losses
+
+def triangular2square_numpy(U):
+    """
+    Given a batch of upper triangular matrices 6x6 given in row contiguous order,
+    convert to the dense square symmetric matrices.
+    """
+    Usq = np.zeros((U.shape[0],6,6), dtype=U.dtype)
+    n = 0
+    for i in range(6):
+        for j in range(i, 6):
+            Usq[:,i,j] = U[:, n]
+            if j > i:
+                Usq[:,j,i] = Usq[:,i,j]
+            n += 1
+    return Usq
+
+def square2triangular_numpy(S):
+    assert S.shape[1] == S.shape[2]
+    d = S.shape[1]
+    U = np.zeros((S.shape[0],d*(d+1)//2), dtype=S.dtype)
+    n = 0
+    for i in range(d):
+        for j in range(i, d):
+            U[:,n] = S[:,i,j]
+            n += 1
+    return U
+
+def batch_cholesky_triangular_numpy(H):
+    """
+    Given an n-by-21 gpuarray representing n 6-by-6 symmetric positive definite
+    matrices, compute Cholesky factors L_n, returning another n-by-21 gpuarray.
+    """
+    # initialize L
+    Hsq = triangular2square_numpy(H)
+    Lsq = np.linalg.cholesky(Hsq)
+    return square2triangular_numpy(np.swapaxes(Lsq,1,2))
+
+def batch_cholesky_solve_numpy(L, pA, pT):
+    """
+    Given a batch of 6x6 cholesky factors (as serialized upper triangles), a
+    batch of 2x2 matrix directions, and a batch of 2-vector translation
+    directions, backsolve the directions.
+    """
+    x = np.zeros((pA.shape[0],6), dtype=pA.dtype)
+    # backsolve the lower triangle
+    x[:,0] =  pA[:,0,0] / L[:,0]
+    x[:,1] = (pA[:,0,1] - x[:,0]*L[:,1]) / L[:,6]
+    x[:,2] = (pA[:,1,0] - x[:,0]*L[:,2]
+                        - x[:,1]*L[:,7]) / L[:,11]
+    x[:,3] = (pA[:,1,1] - x[:,0]*L[:,3]
+                        - x[:,1]*L[:,8]
+                        - x[:,2]*L[:,12]) / L[:,15]
+    x[:,4] = (  pT[:,0] - x[:,0]*L[:,4]
+                        - x[:,1]*L[:,9]
+                        - x[:,2]*L[:,13]
+                        - x[:,3]*L[:,16]) / L[:,18]
+    x[:,5] = (  pT[:,1] - x[:,0]*L[:,5]
+                        - x[:,1]*L[:,10]
+                        - x[:,2]*L[:,14]
+                        - x[:,3]*L[:,17]
+                        - x[:,4]*L[:,19]) / L[:,20]
+    # now backsolve the upper triangle
+    yA = np.zeros_like(pA)
+    yT = np.zeros_like(pT)
+    yT[:,1] =  x[:,5] / L[:,20]
+    yT[:,0] = (x[:,4] - yT[:,1]*L[:,19]) / L[:,18]
+    yA[:,1,1] = (x[:,3] - yT[:,0]*L[:,16]
+                        - yT[:,1]*L[:,17]) / L[:,15]
+    yA[:,1,0] = (x[:,2] - yA[:,1,1]*L[:,12]
+                        - yT[:,0]*L[:,13]
+                        - yT[:,1]*L[:,14]) / L[:,11]
+    yA[:,0,1] = (x[:,1] - yA[:,1,0]*L[:,7]
+                        - yA[:,1,1]*L[:,8]
+                        - yT[:,0]*L[:,9]
+                        - yT[:,1]*L[:,10]) / L[:,6]
+    yA[:,0,0] = (x[:,0] - yA[:,0,1]*L[:,1]
+                        - yA[:,1,0]*L[:,2]
+                        - yA[:,1,1]*L[:,3]
+                        - yT[:,0]*L[:,4]
+                        - yT[:,1]*L[:,5]) / L[:,0]
+    return yA, yT
+
+def match_affine_newton(I, J, num_iters=1000,
+        step_size_A=1., step_size_T=1.,
+        reg_weight_A=1.0, reg_weight_T=1.0,
+        diagonal=False, A=None, T=None, B=None, C=None):
+    # initialize to identity transform
+    if A is None:
+        A = np.zeros((1,2,2), dtype=J.dtype)
+        A[:,0,0] = 1
+        A[:,1,1] = 1
+        A = gpuarray.to_gpu(A, allocator=J.allocator)
+    if T is None:
+        T = gpuarray.zeros((1,2), dtype=J.dtype)
+    dA = gpuarray.empty_like(A)
+    dT = gpuarray.empty_like(T)
+    losses = []
+    for it in range(num_iters):
+        dA.fill(0)
+        dT.fill(0)
+        dA, dT, H, loss = affine_gradient_hessian(I, J, A, T, B=B, C=C, outdA=dA, outdT=dT)
+        # add prior terms
+        centeredA = A.get()
+        centeredA[:,0,0] -= 1.
+        centeredA[:,1,1] -= 1.
+        loss += reg_weight_A*np.sum(centeredA**2) + reg_weight_T*L2(T,T)
+        Hh = H.get()
+        dAh = dA.get()
+        dAh += reg_weight_A*A.get()
+        dAh[:,0,0] -= reg_weight_A
+        dAh[:,1,1] -= reg_weight_A
+        dTh = dT.get()
+        dTh += reg_weight_T*T.get()
+        Hh[:,[0,6,11,15]] += reg_weight_A
+        Hh[:,[18,20]] += reg_weight_T
+        # cholesky and backsolve to get update direction
+        L = batch_cholesky_triangular_numpy(Hh)
+        pA, pT = batch_cholesky_solve_numpy(L, dAh, dTh)
+        if diagonal:
+            pA[:,0,1] = 0
+            pA[:,1,0] = 0
+        pA = gpuarray.to_gpu(pA, allocator=I.allocator)
+        pT = gpuarray.to_gpu(pT, allocator=I.allocator)
+        multiply_add(pA, -step_size_A, out=A)
+        multiply_add(pT, -step_size_T, out=T)
         losses.append(loss)
     return A, T, losses
 
