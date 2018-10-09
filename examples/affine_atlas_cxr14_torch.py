@@ -22,9 +22,9 @@ def standardize(J, A, T, B, C, out=None):
 
 if __name__ == '__main__':
     border=0
-    w = 64
+    w = 128
     with h5py.File(f'/raid/ChestXRay14/chestxray14_{w}.h5', 'r') as f:
-        train_imgs = f['/images/train']
+        train_imgs = f['/images/train'][:65000,...]
         num_samples = train_imgs.shape[0]
 	# I crop the boundary pixels out since they are often introduce discontinuities
         if border > 0:
@@ -82,7 +82,6 @@ if __name__ == '__main__':
             T = torch.autograd.Variable(T, requires_grad=False)
             # TODO: use custom Jacobi method function here instead of fixed GD
             for bit in range(base_image_iters):
-                losses = []
                 Itx = interp(I, A, T)
                 loss = criterion(Itx, J)
                 gI, = torch.autograd.grad(loss, I)
@@ -91,5 +90,5 @@ if __name__ == '__main__':
                 it_losses.append(lossi)
                 timage.set_postfix({'loss':lossi})
                 timage.update()
-            tatlas.set_postfix({'loss':lossi})
+            tatlas.set_postfix({'rel_loss': lossi/it_losses[0], 'loss':lossi})
             tatlas.update()

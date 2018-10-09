@@ -8,7 +8,7 @@
 #include "atomic.cuh"
 #include "interp.cuh"
 
-#define INTERP_BACKWARD_THREADS_X 16
+#define INTERP_BACKWARD_THREADS_X 32
 #define INTERP_BACKWARD_THREADS_Y 32
 const dim3 INTERP_BACKWARD_THREADS(INTERP_BACKWARD_THREADS_X,
     INTERP_BACKWARD_THREADS_Y);
@@ -125,8 +125,9 @@ __global__ void affine_interp_image_kernel_backward_2d(
         const Real* __restrict__ B,
         const Real* __restrict__ C,
         size_t nn, size_t nx, size_t ny) {
-    const size_t i = blockDim.x*blockIdx.x + threadIdx.x;
-    const size_t j = blockDim.y*blockIdx.y + threadIdx.y;
+    const auto ii = blockDim.x*blockIdx.x + threadIdx.x;
+    const auto jj = blockDim.y*blockIdx.y + threadIdx.y;
+    const auto n = blockIdx.z;
     // get a linear thread index to index into the shared arrays
     int tid = threadIdx.x*blockDim.y + threadIdx.y;
     const auto THREADS_PER_BLOCK = INTERP_BACKWARD_NUM_THREADS;
@@ -136,75 +137,86 @@ __global__ void affine_interp_image_kernel_backward_2d(
     __shared__ Real dlA11[THREADS_PER_BLOCK];
     __shared__ Real dlT0[THREADS_PER_BLOCK];
     __shared__ Real dlT1[THREADS_PER_BLOCK];
-    const size_t nxy = nx*ny;
-    const Real* gon = grad_out;
+    // initialize shmem
+    Real dlA00i = 0;
+    Real dlA01i = 0;
+    Real dlA10i = 0;
+    Real dlA11i = 0;
+    Real dlT0i = 0;
+    Real dlT1i = 0;
+    const size_t nnxy = n*nx*ny;
     const Real* In = I;
-    const Real* An = A;
-    const Real* Tn = T;
-    const Real* Bn = B;
-    const Real* Cn = C;
-    Real* gIn = d_I;
-    Real* gAn = d_A;
-    Real* gTn = d_T;
-    // index of current output point (first component. add nxy for second)
-    size_t ix = i*ny + j;
+    Real* d_In = d_I;
+    if (!broadcast_I) {
+        In += nnxy;
+        d_In += nnxy;
+    }
+    const Real* gon = grad_out + nnxy;
+    const Real* An = A + 4*n;
+    const Real* Tn = T + 2*n;
+    const Real* Bn = B + n;
+    const Real* Cn = C + n;
+    Real* d_An = d_A + 4*n;
+    Real* d_Tn = d_T + 2*n;
     // center of rotation
     Real ox = .5*static_cast<Real>(nx-1);
     Real oy = .5*static_cast<Real>(ny-1);
-    Real fi=static_cast<Real>(i)-ox;
-    Real fj=static_cast<Real>(j)-oy;
+    Real fi, fj;
     Real diff, interpval, gx, gy, hx, hy;
-    for (int n=0; n < nn; ++n) {
-        if (i >= nx || j >= ny) {
-            if (need_A) {
-                dlA00[tid] = 0;
-                dlA01[tid] = 0;
-                dlA10[tid] = 0;
-                dlA11[tid] = 0;
-            }
-            if (need_T) {
-                dlT0[tid] = 0;
-                dlT1[tid] = 0;
-            }
-        } else {
-            // what for L2 loss is diff now given as grad_out
-            diff = gon[ix];
+    for (unsigned int i=ii; i < nx; i += blockDim.x) {
+        fi=static_cast<Real>(i)-ox;
+        for (unsigned int j=jj, ix = i*ny+jj; j < ny; j += blockDim.y, ix += blockDim.y) {
+            fj=static_cast<Real>(j)-oy;
 
             // apply affine transform to map i, j to lookup point
             hx = An[0]*fi + An[1]*fj + Tn[0] + ox;
             hy = An[2]*fi + An[3]*fj + Tn[1] + oy;
 
-            // derivative with respect to input is just splat of grad_out
-            if (need_I) {
-                atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_I, NULL,
-                    diff, hx, hy, nx, ny);
-            }
+            // what for L2 loss is diff now given as grad_out
+            diff = gon[ix];
 
+            // derivative with respect to input is just splat of grad_out
+            if (need_I)
+                atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_In, NULL,
+                    diff, hx, hy, nx, ny);
             // get interp value and gradient at lookup point
-            if (need_A || need_T)
+            if (need_A || need_T) {
                 biLerp_grad<Real, DEFAULT_BACKGROUND_STRATEGY>(interpval, gx, gy,
                     In,
                     hx, hy,
                     nx, ny,
                     0.f);
-            if (use_contrast) {
-                diff = Bn[0]*diff + Cn[0];
-                gx *= Bn[0];
-                gy *= Bn[0];
+                if (use_contrast) {
+                    diff = Bn[0]*diff + Cn[0];
+                    gx *= Bn[0];
+                    gy *= Bn[0];
+                }
+                gx *= diff; // save a few multiplies by premultiplying
+                gy *= diff;
+                // compute the outer product terms that will be summed
+                if (need_A) {
+                    dlA00i += gx*fi;
+                    dlA01i += gx*fj;
+                    dlA10i += gy*fi;
+                    dlA11i += gy*fj;
+                }
+                if (need_T) {
+                    dlT0i += gx;
+                    dlT1i += gy;
+                }
             }
-            gx *= diff; // save a few multiplies by premultiplying
-            gy *= diff;
-            // compute the outer product terms that will be summed
-            if (need_A) {
-                dlA00[tid] = gx*fi;
-                dlA01[tid] = gx*fj;
-                dlA10[tid] = gy*fi;
-                dlA11[tid] = gy*fj;
-            }
-            if (need_T) {
-                dlT0[tid] = gx;
-                dlT1[tid] = gy;
-            }
+        }
+    }
+    if (need_A || need_T) {
+        if (need_A) {
+            dlA00[tid] = dlA00i;
+            dlA01[tid] = dlA01i;
+            dlA10[tid] = dlA10i;
+            dlA11[tid] = dlA11i;
+        }
+        if (need_T) {
+            dlT0[tid] = dlT0i;
+            dlT1[tid] = dlT1i;
         }
 
         // reduce this block
@@ -240,30 +252,16 @@ __global__ void affine_interp_image_kernel_backward_2d(
         INTERP_BACKWARD_REDUCE_BLOCK(1)
         if (tid == 0) {
             if (need_A) {
-                atomicAdd(&gAn[0], dlA00[0]);
-                atomicAdd(&gAn[1], dlA01[0]);
-                atomicAdd(&gAn[2], dlA10[0]);
-                atomicAdd(&gAn[3], dlA11[0]);
+                d_An[0] = dlA00[0];
+                d_An[1] = dlA01[0];
+                d_An[2] = dlA10[0];
+                d_An[3] = dlA11[0];
             }
             if (need_T) {
-                atomicAdd(&gTn[0], dlT0[0]);
-                atomicAdd(&gTn[1], dlT1[0]);
+                d_Tn[0] = dlT0[0];
+                d_Tn[1] = dlT1[0];
             }
         }
-
-        if (!broadcast_I) {
-            In += nxy;
-            gIn += nxy;
-        }
-        gon += nxy;
-        An += 4;
-        Tn += 2;
-        if (use_contrast) {
-            Bn++;
-            Cn++;
-        }
-        gAn += 4;
-        gTn += 2;
     }
 }
 
@@ -279,8 +277,7 @@ std::vector<at::Tensor> affine_interp_image_cuda_backward_impl(
 	auto d_T = need_T ? at::zeros_like(T) : at::zeros({0}, T.type());
 
     const auto threads = INTERP_BACKWARD_THREADS;
-    const dim3 blocks((I.size(1) + threads.x - 1) / threads.x,
-                      (I.size(2) + threads.y - 1) / threads.y);
+    const dim3 blocks(1,1,A.size(0));
 
     const bool broadcast_I = I.size(0) == 1 && grad_out.size(0) > 1;
 
