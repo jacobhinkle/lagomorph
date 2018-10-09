@@ -1,9 +1,13 @@
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
+# determine compute capability for present gpu
+from torch.cuda import get_device_capability
+cuda_cap = get_device_capability(0)
+
 setup(
     name="lagomorph",
-    version="0.1.4",
+    version="0.1.5",
     packages=['lagomorph', 'lagomorph.torch'],
     include_package_data=True,
     python_requires=">=3.6",
@@ -12,7 +16,11 @@ setup(
     tests_require=['pytest'],
     cmdclass={'build_ext': BuildExtension},
     ext_modules=[CUDAExtension('lagomorph_torch_cuda', [
-        'lagomorph/torch/affine_cuda.cpp',
-        'lagomorph/torch/affine_cuda_kernels.cu'
-            ], include_dirs=["lagomorph/torch"])]
+            'lagomorph/torch/affine_cuda.cpp',
+            'lagomorph/torch/affine_cuda_kernels.cu'
+        ],
+        include_dirs=["lagomorph/torch"],
+        extra_compile_args={'cxx': ['-O3'],
+            'nvcc': [f'-arch=sm_{cuda_cap[0]}{cuda_cap[1]}']})]
+        #extra_cuda_flags=['-use_fast_math'])]
 )
