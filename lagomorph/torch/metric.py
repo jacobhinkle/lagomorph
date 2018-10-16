@@ -44,13 +44,15 @@ class FluidMetric(object):
                         requirements='C')).to(device))
     def operator(self, mv, inverse):
         # call the appropriate cuda kernel here
-        self.initialize_luts(shape=mv.shape, device=mv.device)
+        sh = mv.shape
+        self.initialize_luts(shape=sh, device=mv.device)
         spatial_dim = mv.dim()-2
         Fmv = torch.rfft(mv, spatial_dim, normalized=True)
         lagomorph_torch_cuda.fluid_operator(Fmv, inverse,
                 self.luts['cos'], self.luts['sin'],
                 self.alpha, self.beta, self.gamma)
-        return torch.irfft(Fmv, spatial_dim, normalized=True)
+        return torch.irfft(Fmv, spatial_dim, normalized=True,
+                signal_sizes=sh[2:])
     def sharp(self, m):
         """
         Raise indices, meaning convert a momentum (covector field) to a velocity
