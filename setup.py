@@ -7,7 +7,7 @@ cuda_cap = get_device_capability(0)
 
 setup(
     name="lagomorph",
-    version="0.1.6",
+    version="0.1.7",
     packages=['lagomorph', 'lagomorph.torch'],
     include_package_data=True,
     python_requires=">=3.6",
@@ -16,8 +16,9 @@ setup(
     tests_require=['pytest'],
     cmdclass={'build_ext': BuildExtension},
     ext_modules=[CUDAExtension('lagomorph_torch_cuda', [
-            'lagomorph/torch/affine_cuda.cpp',
-            'lagomorph/torch/affine_cuda_kernels.cu'
+            'lagomorph/torch/affine_cuda_kernels.cu',
+            'lagomorph/torch/metric_cuda_kernels.cu',
+            'lagomorph/torch/extension.cpp'
         ],
         include_dirs=["lagomorph/torch"],
         extra_compile_args={'cxx': ['-O3'],
