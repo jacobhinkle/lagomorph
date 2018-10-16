@@ -7,7 +7,7 @@ cuda_cap = get_device_capability(0)
 
 setup(
     name="lagomorph",
-    version="0.1.8",
+    version="0.1.9",
     packages=['lagomorph', 'lagomorph.torch'],
     include_package_data=True,
     python_requires=">=3.6",

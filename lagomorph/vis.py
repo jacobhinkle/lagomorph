@@ -1,14 +1,30 @@
-from pycuda import gpuarray
 import numpy as np
 
 from .deform import identity
 
+def to_numpy(arr):
+    if isinstance(arr, np.ndarray):
+        return arr
+    try:
+        from pycuda import gpuarray
+        if isinstance(arr, gpuarray.GPUArray):
+            return arr.get()
+    except ImportError:
+        pass
+    try:
+        import torch
+        if isinstance(arr, torch.Tensor):
+            return arr.cpu().numpy()
+    except ImportError:
+        pass
+
+    raise Exception(f"Cannot convert type {type(arr)} to numpy.ndarray.")
+
 def gridplot(u, Nx=64, Ny=64, displacement=True, color='black', **kwargs):
     """Given a displacement field, plot a displaced grid"""
+    u = to_numpy(u)
     assert u.shape[0] == 1, "Only send one deformation at a time"
     from matplotlib import pyplot as plt
-    if isinstance(u, gpuarray.GPUArray):
-        u = u.get()
     if Nx is None:
         Nx = u.shape[2]
     if Ny is None:
@@ -37,11 +53,10 @@ def gridplot(u, Nx=64, Ny=64, displacement=True, color='black', **kwargs):
 
 def quiver(u, Nx=32, Ny=32, color='black', units='xy', angles='xy', scale=1.0, **kwargs):
     """Given a displacement field, plot a quiver of vectors"""
+    u = to_numpy(u)
     assert u.shape[0] == 1, "Only send one deformation at a time"
     assert u.ndim == 4, "Only 2D deformations can use quiver()"
     from matplotlib import pyplot as plt
-    if isinstance(u, gpuarray.GPUArray):
-        u = u.get()
     if Nx is None:
         Nx = u.shape[2]
     if Ny is None:
