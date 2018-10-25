@@ -12,11 +12,10 @@ enum BackgroundStrategy { BACKGROUND_STRATEGY_PARTIAL_ID,
 
 const auto DEFAULT_BACKGROUND_STRATEGY = BACKGROUND_STRATEGY_CLAMP;
 
-// Set lagomorph_debug to 1 to enable cuda error checking (causes synchronization)
-#define lagomorph_debug 0
+extern bool lagomorph_debug_mode;
 
 #define LAGOMORPH_CUDA_CHECK(file, line) \
-  if (lagomorph_debug) { \
+  if (lagomorph_debug_mode) { \
 	cudaDeviceSynchronize(); \
 	cudaError_t error = cudaGetLastError(); \
 	if(error != cudaSuccess) \

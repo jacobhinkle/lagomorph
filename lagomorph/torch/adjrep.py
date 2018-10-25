@@ -42,8 +42,11 @@ def ad_star(v, m):
     Note that this is the numerical adjoint of ad(v,.), which is implemented
     using the common finite difference scheme.
     """
-    return jacobian_times_vectorfield_adjoint(v, m, displacement=False) \
-         - jacobian_times_vectorfield(m, v, transpose=True, displacement=False)
+    return jacobian_times_vectorfield(v, m,
+                displacement=False, transpose=True) \
+         - jacobian_times_vectorfield_adjoint(m, v,
+                displacement=False)
+         
 def Ad_star(phiinv, m):
     """
     This is Ad^*(phi,m), the big coadjoint action of a deformation phi on a
