@@ -34,12 +34,14 @@ std::vector<at::Tensor> affine_interp_image_cuda_backward(
 at::Tensor jacobian_times_vectorfield_forward(
     at::Tensor g,
     at::Tensor v,
-    bool displacement);
+    bool displacement,
+    bool transpose);
 std::vector<at::Tensor> jacobian_times_vectorfield_backward(
     at::Tensor grad_out,
     at::Tensor v,
     at::Tensor w,
     bool displacement,
+    bool transpose,
     bool need_v,
     bool need_w);
 void fluid_operator_cuda(

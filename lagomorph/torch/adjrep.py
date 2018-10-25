@@ -37,7 +37,10 @@ def ad_star(v, m):
 
         ad^*(v, m) = (Dv)^T m + Dm v + m div v
 
-    where div denotes the divergence of a vector field
+    where div denotes the divergence of a vector field.
+
+    Note that this is the numerical adjoint of ad(v,.), which is implemented
+    using the common finite difference scheme.
     """
     return jacobian_times_vectorfield_adjoint(v, m, displacement=False) \
          - jacobian_times_vectorfield(m, v, transpose=True, displacement=False)
@@ -50,7 +53,6 @@ def Ad_star(phiinv, m):
 
     where D denotes the Jacobian matrix.
     """
-    # First interpolate m
     mphiinv = interp(m, phiinv)
     return jacobian_times_vectorfield(phiinv, mphiinv, displacement=True)
 # dagger versions of the above coadjoint operators

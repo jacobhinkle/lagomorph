@@ -23,3 +23,13 @@ const auto DEFAULT_BACKGROUND_STRATEGY = BACKGROUND_STRATEGY_CLAMP;
 		printf("CUDA error at %s:%d: %s\n", file, line, cudaGetErrorString(error)); \
   }
 
+#define LAGOMORPH_DISPATCH_BOOL(VALUE, PLACEHOLDERNAME, ...) \
+	[&] { \
+        if (VALUE) { \
+            const bool PLACEHOLDERNAME = true; \
+            return __VA_ARGS__(); \
+        } else { \
+            const bool PLACEHOLDERNAME = false; \
+            return __VA_ARGS__(); \
+        } \
+    }()

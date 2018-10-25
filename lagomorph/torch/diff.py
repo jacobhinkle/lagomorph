@@ -11,19 +11,23 @@ class JacobianTimesVectorFieldFunction(torch.autograd.Function):
     If the argument 'displacement' is True (False by default) then the argument
     v is treated as the displacement of a deformation whose Jacobian matrix
     should be computed (by adding ones to the diagonal) instead of v itself.
+
+    If the argument 'transpose' is True (False by default) then the Jacobian is
+    transposed before contracting with w.
     """
     @staticmethod
-    def forward(ctx, v, w, displacement):
+    def forward(ctx, v, w, displacement, transpose):
         ctx.displacement = displacement
+        ctx.transpose = transpose
         ctx.save_for_backward(v, w)
-        return lagomorph_torch_cuda.jacobian_times_vectorfield_forward(v, w, displacement)
+        return lagomorph_torch_cuda.jacobian_times_vectorfield_forward(v, w, displacement, transpose)
     @staticmethod
     def backward(ctx, gradout):
         v, w = ctx.saved_tensors
-        d_v, d_w = lagomorph_torch_cuda.jacobian_times_vectorfield_backward(gradout, v, w, ctx.displacement, *ctx.needs_input_grad[:2])
-        return d_v, d_w, None
-def jacobian_times_vectorfield(v, w, displacement=True):
-    return JacobianTimesVectorFieldFunction.apply(v, w, displacement)
+        d_v, d_w = lagomorph_torch_cuda.jacobian_times_vectorfield_backward(gradout, v, w, ctx.displacement, ctx.transpose, *ctx.needs_input_grad[:2])
+        return d_v, d_w, None, None
+def jacobian_times_vectorfield(v, w, displacement=True, transpose=False):
+    return JacobianTimesVectorFieldFunction.apply(v, w, displacement, transpose)
 
 class JacobianTimesVectorFieldAdjointFunction(torch.autograd.Function):
     """
@@ -37,11 +41,11 @@ class JacobianTimesVectorFieldAdjointFunction(torch.autograd.Function):
     def forward(ctx, v, w, displacement):
         ctx.displacement = displacement
         ctx.save_for_backward(v, w)
-        return lagomorph_torch_cuda.jacobian_times_vectorfield_forward(v, w, displacement)
+        return lagomorph_torch_cuda.jacobian_times_vectorfield_adjoint_forward(v, w, displacement)
     @staticmethod
     def backward(ctx, gradout):
         v, w = ctx.saved_tensors
-        d_v, d_w = lagomorph_torch_cuda.jacobian_times_vectorfield_backward(gradout, v, w, ctx.displacement, *ctx.needs_input_grad[:2])
+        d_v, d_w = lagomorph_torch_cuda.jacobian_times_vectorfield_adjoint_backward(gradout, v, w, ctx.displacement, *ctx.needs_input_grad[:2])
         return d_v, d_w, None
 def jacobian_times_vectorfield_adjoint(v, w, displacement=True):
     return JacobianTimesVectorFieldFunction.apply(v, w, displacement)
