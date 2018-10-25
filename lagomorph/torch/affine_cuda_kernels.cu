@@ -72,14 +72,16 @@ at::Tensor affine_interp_image_cuda_forward(
     at::Tensor A,
     at::Tensor T) {
     AT_ASSERTM(A.size(0) == T.size(0), "A and T must have same first dimension")
+    AT_ASSERTM(I.size(0) == 1, "Multi-channel affine interpolation not supported")
+    AT_ASSERTM(I.dim() == 4, "Only two-dimensional affine interpolation is supported")
 
     const dim3 threads(32, 32);
-    const dim3 blocks((I.size(1) + threads.x - 1) / threads.x,
-                    (I.size(2) + threads.y - 1) / threads.y);
+    const dim3 blocks((I.size(2) + threads.x - 1) / threads.x,
+                    (I.size(3) + threads.y - 1) / threads.y);
 
     const bool broadcast_I = I.size(0) == 1 && A.size(0) > 1;
 
-    auto Itx = at::zeros({A.size(0), I.size(1), I.size(2)}, I.type());
+    auto Itx = at::zeros({A.size(0), I.size(1), I.size(2), I.size(3)}, I.type());
 
     if (broadcast_I) {
         AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_image_cuda_forward", ([&] {
@@ -91,8 +93,8 @@ at::Tensor affine_interp_image_cuda_forward(
             NULL,
             NULL,
             A.size(0),
-            I.size(1),
-            I.size(2));
+            I.size(2),
+            I.size(3));
         }));
     } else {
         AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_image_cuda_forward", ([&] {
@@ -104,10 +106,11 @@ at::Tensor affine_interp_image_cuda_forward(
             NULL,
             NULL,
             A.size(0),
-            I.size(1),
-            I.size(2));
+            I.size(2),
+            I.size(3));
         }));
     }
+	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return Itx;
 }
@@ -184,8 +187,7 @@ __global__ void affine_interp_image_kernel_backward_2d(
                 biLerp_grad<Real, DEFAULT_BACKGROUND_STRATEGY>(interpval, gx, gy,
                     In,
                     hx, hy,
-                    nx, ny,
-                    0.f);
+                    nx, ny);
                 if (use_contrast) {
                     diff = Bn[0]*diff + Cn[0];
                     gx *= Bn[0];
@@ -294,8 +296,8 @@ std::vector<at::Tensor> affine_interp_image_cuda_backward_impl(
             NULL,
             NULL,
             grad_out.size(0),
-            grad_out.size(1),
-            grad_out.size(2));
+            grad_out.size(2),
+            grad_out.size(3));
         }));
     } else {
         AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_image_cuda_backward", ([&] {
@@ -310,10 +312,11 @@ std::vector<at::Tensor> affine_interp_image_cuda_backward_impl(
             NULL,
             NULL,
             grad_out.size(0),
-            grad_out.size(1),
-            grad_out.size(2));
+            grad_out.size(2),
+            grad_out.size(3));
         }));
     }
+	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return {d_I, d_A, d_T};
 }

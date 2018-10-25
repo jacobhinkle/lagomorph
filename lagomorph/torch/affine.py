@@ -14,7 +14,7 @@ class AffineInterpImageFunction(torch.autograd.Function):
             T.contiguous())
     @staticmethod
     def backward(ctx, grad_out):
-        I, A, T = ctx.saved_variables
+        I, A, T = ctx.saved_tensors
         d_I, d_A, d_T = lagomorph_torch_cuda.affine_interp_image_backward(
                 grad_out.contiguous(),
                 I.contiguous(),

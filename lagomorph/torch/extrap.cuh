@@ -1,22 +1,22 @@
+/* vim: set ft=cuda: */
 #pragma once
 
 #include "defs.cuh"
 
 template<typename Real>
-inline __device__ Real get_pixel_3d(int x, int y, int z,
-                                    const Real* d_i,
-                                    size_t sizeX, size_t sizeY, size_t sizeZ)
-{
-    auto index = (x * sizeY + y) * sizeZ + z;
-    return d_i[index];
-}
-
-template<typename Real>
-__device__ Real get_pixel_2d(int x, int y,
-                                    const Real* d_i,
-                                    size_t sizeX, size_t sizeY)
+__device__ Real get_pixel(int x, int y,
+                          const Real* d_i,
+                          size_t sizeX, size_t sizeY)
 {
     auto index =  x * sizeY + y;
+    return d_i[index];
+}
+template<typename Real>
+inline __device__ Real get_pixel(int x, int y, int z,
+                                 const Real* d_i,
+                                 size_t sizeX, size_t sizeY, size_t sizeZ)
+{
+    auto index = (x * sizeY + y) * sizeZ + z;
     return d_i[index];
 }
 
@@ -107,3 +107,74 @@ inline __device__ void wrapBackground(int& floorX,int& floorY,int& floorZ,
     wrapBackground(floorZ, ceilZ, sizeZ);
 }
 
+template<typename Real, BackgroundStrategy backgroundStrategy>
+inline __device__
+Real
+get_value_safe(const Real* arr, int nx, int ny, int i, int j, Real background=0.0f) {
+    int ii=i, jj=j;
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrap(ii, nx);
+        wrap(jj, ny);
+        return arr[ii*ny + jj];
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clamp(ii, nx);
+        clamp(jj, ny);
+        return arr[ii*ny + jj];
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+
+	if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	   backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+	    background = 0.f;
+	}
+
+        if (ii >= 0 && ii < nx && jj >= 0 && jj < ny)
+            return arr[ii*ny + jj];
+        else
+            return background;
+    }else{
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+	return 0.f;
+    }
+}
+
+template<BackgroundStrategy backgroundStrategy>
+inline __device__ bool map_point(int& floorX, int& floorY,
+               int& ceilX, int& ceilY,
+               size_t  sizeX, size_t  sizeY) {
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrapBackground(floorX, floorY,
+                       ceilX, ceilY,
+                       sizeX, sizeY);
+        return true;
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clampBackground(floorX, floorY,
+                        ceilX, ceilY,
+                        sizeX, sizeY);
+        return true;
+    }
+    else {
+        return isInside(floorX, floorY,
+                          ceilX, ceilY,
+                          sizeX, sizeY);
+    }
+}

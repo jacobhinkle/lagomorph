@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "atomic.cuh"
+#include "defs.cuh"
 #include "interp.cuh"
 
 #define PI  3.14159265358979323846
@@ -154,6 +155,7 @@ fluid_kernel_2d(Real* __restrict__ Fm,
       } else {
         weight = 0.0;
       }
+      if (inverseOp && weight > 0.0) weight = 1./weight;
 
       Fm[ix] *= weight;
       Fm[ix+1] *= weight;
@@ -182,12 +184,14 @@ void fluid_operator_cuda(
     std::vector<at::Tensor> sinluts,
     double alpha,
     double beta,
-    double gamma) {
+    double gamma,
+    const int cutoffX,
+    const int cutoffY) {
     auto dim = Fmv.dim() - 3;
     AT_ASSERTM(Fmv.size(1) == dim, "Vector field has incorrect shape for dimension")
     AT_ASSERTM(Fmv.type() == cosluts[0].type(), "Type of LUTs must equal that of image")
 
-    const dim3 threads(32, 32);
+    const dim3 threads(16, 32);
     const dim3 blocks((Fmv.size(2) + threads.x - 1) / threads.x,
                     (Fmv.size(3) + threads.y - 1) / threads.y);
 
@@ -202,11 +206,11 @@ void fluid_operator_cuda(
                     sinluts[1].data<scalar_t>(),
                     alpha, beta, gamma,
                     Fmv.size(0), Fmv.size(2), Fmv.size(3),
-                    0, 0);
+                    cutoffX, cutoffY);
                 }));
         } else {
             AT_DISPATCH_FLOATING_TYPES(Fmv.type(), "fluid_operator_cuda", ([&] {
-                fluid_kernel_2d<scalar_t, true><<<blocks, threads>>>(
+                fluid_kernel_2d<scalar_t, false><<<blocks, threads>>>(
                     Fmv.data<scalar_t>(),
                     cosluts[0].data<scalar_t>(),
                     sinluts[0].data<scalar_t>(),
@@ -214,10 +218,11 @@ void fluid_operator_cuda(
                     sinluts[1].data<scalar_t>(),
                     alpha, beta, gamma,
                     Fmv.size(0), Fmv.size(2), Fmv.size(3),
-                    0, 0);
+                    cutoffX, cutoffY);
                 }));
         }
     } else if (dim == 3) {
     } else {
     }
+    LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 }

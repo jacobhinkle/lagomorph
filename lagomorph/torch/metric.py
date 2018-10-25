@@ -5,6 +5,31 @@ import torch
 import lagomorph_torch_cuda
 import numpy as np
 
+class FluidMetricOperator(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, params, luts, inverse, cutoffs, mv):
+        ctx.params = params
+        ctx.luts = luts
+        ctx.inverse = inverse
+        ctx.cutoffs = cutoffs
+        sh = mv.shape
+        spatial_dim = len(sh)-2
+        Fmv = torch.rfft(mv, spatial_dim, normalized=True)
+        lagomorph_torch_cuda.fluid_operator(Fmv, inverse,
+                luts['cos'], luts['sin'], *params, *cutoffs)
+        return torch.irfft(Fmv, spatial_dim, normalized=True,
+                signal_sizes=sh[2:])
+    @staticmethod
+    def backward(ctx, outgrad):
+        sh = outgrad.shape
+        spatial_dim = len(sh)-2
+        Fmv = torch.rfft(outgrad, spatial_dim, normalized=True)
+        lagomorph_torch_cuda.fluid_operator(Fmv, ctx.inverse,
+                ctx.luts['cos'], ctx.luts['sin'], *ctx.params, *ctx.cutoffs)
+        return None, None, None, None, torch.irfft(Fmv, spatial_dim, normalized=True,
+                signal_sizes=sh[2:])
+
+
 class FluidMetric(object):
     def __init__(self, params=[.1, .0, .001]):
         """
@@ -18,11 +43,9 @@ class FluidMetric(object):
         self.shape = None
         self.complexshape = None
         assert len(params)==3
-        self.alpha = float(params[0])
-        self.beta = float(params[1])
-        self.gamma = float(params[2])
+        self.params = params
         self.luts = None
-    def initialize_luts(self, shape, device='cuda'):
+    def initialize_luts(self, shape, dtype, device='cuda'):
         """
         Fill out lookup tables used in Fourier kernel. This amounts to just
         precomputing the sine and cosine (period N_d) for each dimension.
@@ -36,23 +59,15 @@ class FluidMetric(object):
             self.luts = {'cos': [], 'sin': []}
             for (Nf,N) in zip(self.complexshape[2:], self.shape[2:]):
                 self.luts['cos'].append(torch.Tensor(
-                    np.require(2.*(1.-np.cos(2*np.pi*np.arange(Nf,
-                        dtype=np.float64)/N)),
-                        requirements='C')).to(device))
+                    2.*(1.-np.cos(2*np.pi*np.arange(Nf)/N))).type(dtype).to(device))
                 self.luts['sin'].append(torch.Tensor(
-                    np.require(np.sin(2.*np.pi*np.arange(Nf, dtype=np.float64)/N),
-                        requirements='C')).to(device))
-    def operator(self, mv, inverse):
-        # call the appropriate cuda kernel here
-        sh = mv.shape
-        self.initialize_luts(shape=sh, device=mv.device)
-        spatial_dim = mv.dim()-2
-        Fmv = torch.rfft(mv, spatial_dim, normalized=True)
-        lagomorph_torch_cuda.fluid_operator(Fmv, inverse,
-                self.luts['cos'], self.luts['sin'],
-                self.alpha, self.beta, self.gamma)
-        return torch.irfft(Fmv, spatial_dim, normalized=True,
-                signal_sizes=sh[2:])
+                    np.sin(2.*np.pi*np.arange(Nf)/N)).type(dtype).to(device))
+    def operator(self, mv, inverse, cutoffs=0):
+        if isinstance(cutoffs, int):
+            cutoffs = [cutoffs]*(len(mv.shape)-2)
+        self.initialize_luts(shape=mv.shape, dtype=mv.dtype, device=mv.device)
+        return FluidMetricOperator.apply(self.params, self.luts, inverse,
+                cutoffs, mv)
     def sharp(self, m):
         """
         Raise indices, meaning convert a momentum (covector field) to a velocity

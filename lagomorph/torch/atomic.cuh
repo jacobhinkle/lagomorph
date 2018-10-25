@@ -1,3 +1,4 @@
+/* vim: set ft=cuda: */
 #pragma once
 
 #if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 600

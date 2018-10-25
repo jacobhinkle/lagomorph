@@ -1,3 +1,4 @@
+/* vim: set ft=cuda: */
 #pragma once
 
 #include "atomic.cuh"
@@ -32,10 +33,10 @@ inline __device__ Real biLerp(const Real* __restrict__ img,
                     ceilX, ceilY,
                     sizeX, sizeY);
 
-    v0 = get_pixel_2d(floorX, floorY, img, sizeX, sizeY);
-    v1 = get_pixel_2d(ceilX, floorY, img, sizeX, sizeY);
-    v2 = get_pixel_2d(ceilX, ceilY, img, sizeX, sizeY);
-    v3 = get_pixel_2d(floorX, ceilY, img, sizeX, sizeY);
+    v0 = get_pixel(floorX, floorY, img, sizeX, sizeY);
+    v1 = get_pixel(ceilX, floorY, img, sizeX, sizeY);
+    v2 = get_pixel(ceilX, ceilY, img, sizeX, sizeY);
+    v3 = get_pixel(floorX, ceilY, img, sizeX, sizeY);
 
     //
     // this is the basic bilerp function...
@@ -62,8 +63,7 @@ void
 biLerp_grad(Real& Ix, Real& gx, Real& gy,
         const Real* __restrict__ img,
 	Real x, Real y,
-	int sizeX, int sizeY,
-	Real background = 0.f)
+	int sizeX, int sizeY)
 {
     int floorX = (int)(x);
     int floorY = (int)(y);
@@ -82,51 +82,15 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
     Real oneMinusU = 1.f- u;
 
     Real v0, v1, v2, v3;
-    int inside = 1;
-
-    // adjust the position of the sample point if required
-    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
-        wrapBackground(floorX, floorY,
+    // inside indicates whether we can safely do lookups with the mapped indices
+    bool inside = map_point<backgroundStrategy>(floorX, floorY,
                        ceilX, ceilY,
                        sizeX, sizeY);
-    }
-    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
-        clampBackground(floorX, floorY,
-                        ceilX, ceilY,
-                        sizeX, sizeY);
-    }
-    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
-	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
-	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
-
-	if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
-	   backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
-	    background = 0.f;
-	}
-
-        inside = isInside(floorX, floorY,
-                          ceilX, ceilY,
-                          sizeX, sizeY);
-    }else{
-	// unknown background strategy, don't allow compilation
-	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
-		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
-		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
-		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
-		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
-                      "Unknown background strategy");
-        Ix = 0.f;
-        gx = 0.f;
-        gy = 0.f;
-	return;
-    }
-
-
     if (inside){
-        v0 = get_pixel_2d(floorX, floorY, img, sizeX, sizeY);
-        v1 = get_pixel_2d(ceilX, floorY, img, sizeX, sizeY);
-        v2 = get_pixel_2d(ceilX, ceilY, img, sizeX, sizeY);
-        v3 = get_pixel_2d(floorX, ceilY, img, sizeX, sizeY);
+        v0 = get_pixel(floorX, floorY, img, sizeX, sizeY);
+        v1 = get_pixel(ceilX, floorY, img, sizeX, sizeY);
+        v2 = get_pixel(ceilX, ceilY, img, sizeX, sizeY);
+        v3 = get_pixel(floorX, ceilY, img, sizeX, sizeY);
     }else {
         bool floorXIn = floorX >= 0 && floorX < sizeX;
         bool floorYIn = floorY >= 0 && floorY < sizeY;
@@ -134,10 +98,10 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
         bool ceilXIn = ceilX >= 0 && ceilX < sizeX;
         bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
 
-        v0 = (floorXIn && floorYIn) ? get_pixel_2d(floorX, floorY, img, sizeX, sizeY): background;
-        v1 = (ceilXIn && floorYIn)  ? get_pixel_2d(ceilX, floorY, img, sizeX, sizeY): background;
-        v2 = (ceilXIn && ceilYIn)   ? get_pixel_2d(ceilX, ceilY, img, sizeX, sizeY): background;
-        v3 = (floorXIn && ceilYIn)  ? get_pixel_2d(floorX, ceilY, img, sizeX, sizeY): background;
+        v0 = (floorXIn && floorYIn) ? get_pixel(floorX, floorY, img, sizeX, sizeY): 0;
+        v1 = (ceilXIn && floorYIn)  ? get_pixel(ceilX, floorY, img, sizeX, sizeY): 0;
+        v2 = (ceilXIn && ceilYIn)   ? get_pixel(ceilX, ceilY, img, sizeX, sizeY): 0;
+        v3 = (floorXIn && ceilYIn)  ? get_pixel(floorX, ceilY, img, sizeX, sizeY): 0;
     }
 
     //
@@ -167,12 +131,12 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
                          u         * v3) +
             t         * (oneMinusU * v1  +
                          u         * v2);
-    gx = oneMinusU * (v1 - v0) + u * (v2 - v3);
-    gy = oneMinusT * (v3 - v0) + t * (v2 - v1);
+    gx = v1 - v0 + u * (v2 - v3 - v1 + v0);
+    gy = v3 - v0 + t * (v2 - v1 - v3 + v0);
 }
 
 
-template<typename Real, BackgroundStrategy backgroundStrategy, int write_weights>
+template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
 inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt,
@@ -207,7 +171,7 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
     atomicAdd(&d_wd[nid], ww*mass);
 }
 
-template<typename Real, BackgroundStrategy backgroundStrategy, int write_weights>
+template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
 inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt, int zInt,
@@ -250,7 +214,7 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
     atomicAdd(&d_wd[nid], ww*mass);
 }
 
-template<typename Real, BackgroundStrategy backgroundStrategy, int write_weights>
+template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
 inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
         Real mass, Real x, Real y,
         int w, int h)
@@ -261,8 +225,8 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
     if (x < 0 && x != xInt) --xInt;
     if (y < 0 && y != yInt) --yInt;
 
-    Real dx = 1.f - (x - xInt);
-    Real dy = 1.f - (y - yInt);
+    Real dx = 1.f - (x - static_cast<Real>(xInt));
+    Real dy = 1.f - (y - static_cast<Real>(yInt));
 
     for (int xi=xInt;xi<xInt+2;xi++) {
         for (int yi=yInt;yi<yInt+2;yi++) {
@@ -273,7 +237,7 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
         dx = 1.f-dx;
     }
 }
-template<typename Real, BackgroundStrategy backgroundStrategy, int write_weights>
+template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
 inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
         Real mass, Real x, Real y, Real z,
         int w, int h, int l)
