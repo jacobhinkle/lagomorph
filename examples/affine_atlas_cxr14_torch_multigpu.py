@@ -20,9 +20,9 @@ if __name__ == '__main__':
     rank = comm.Get_rank()
     atexit.register(MPI.Finalize)
 
-    num_local_gpus = 1
+    num_local_gpus = torch.cuda.device_count()
 
-    dist.init_process_group(backend="mpi",
+    dist.init_process_group(backend="nccl",
                             init_method="file:///tmp/distributed_test",
                             world_size=world_size,
                             rank=rank)
@@ -30,8 +30,9 @@ if __name__ == '__main__':
     border=0
 
     w = 128
+    Js = []
     with h5py.File(f'/raid/ChestXRay14/chestxray14_{w}.h5', 'r') as f:
-        train_imgs = f['/images/train'][:65000,...]
+        train_imgs = f['/images/train']#[:65000,...]
         num_samples = train_imgs.shape[0]
         # determine how many (max) examples per device
         total_gpus = num_local_gpus * world_size
@@ -53,13 +54,14 @@ if __name__ == '__main__':
     regA = regT = 1e-3
     #interp = lt.AffineInterpImage()
     interp = lt.AffineInterpImageFunction.apply
-    A = J.new_zeros((J.size(0), 2, 2))
-    A[:,0,0] = 1.
-    A[:,1,1] = 1.
-    T = J.new_zeros((J.size(0), 2))
+    As = [J.new_zeros((J.size(0), 2, 2)) for J in Js]
+    for A in As:
+        A[:,0,0] = 1.
+        A[:,1,1] = 1.
+    Ts = [J.new_zeros((J.size(0), 2)) for J in Js]
     # initialize image is just arithmetic mean of inputs
-    I = J.sum(dim=0, keepdim=True)/num_samples
-    dist.all_reduce(I)
+    Is = [J.sum(dim=0, keepdim=True)/num_samples for J in Js]
+    dist.all_reduce_multigpu(Is)
     atlas_iters = 100
     base_image_iters = 10
     match_iters = 100
@@ -76,36 +78,43 @@ if __name__ == '__main__':
             # reset progress bars
             tmatch.n = timage.n = 0
             tmatch.refresh(), timage.refresh()
-            I = torch.autograd.Variable(I, requires_grad=False)
-            A = torch.autograd.Variable(A, requires_grad=True)
-            T = torch.autograd.Variable(T, requires_grad=True)
-            optimizer = torch.optim.SGD([{'params':[A], 'lr':stepsize_A},
-                            {'params':[T], 'lr':stepsize_T}], momentum=0.0)
+            Is = [torch.autograd.Variable(I, requires_grad=False) for I in Is]
+            As = [torch.autograd.Variable(A, requires_grad=True) for A in As]
+            Ts = [torch.autograd.Variable(T, requires_grad=True) for T in Ts]
+            optimizers = [torch.optim.SGD([{'params':[A], 'lr':stepsize_A},
+                            {'params':[T], 'lr':stepsize_T}], momentum=0.0) for
+                            (I,A,T) in zip(Is, As, Ts)]
             for mit in range(match_iters):
-                optimizer.zero_grad()
-                optimizers.append(optimizers)
-                Itx = interp(I, A, T)
-                loss = criterion(Itx, J)
-                loss.backward()
-                optimizer.step()
-                dist.reduce(losses, 0)
-                lossi = loss.item()
+                losses = []
+                for (I,A,T,J,optimizer) in zip(Is, As, Ts, Js, optimizers):
+                    optimizer.zero_grad()
+                    optimizers.append(optimizers)
+                    Itx = interp(I, A, T)
+                    loss = criterion(Itx, J)
+                    loss.backward()
+                    losses.append(loss)
+                    optimizer.step()
+                dist.reduce_multigpu(losses, 0)
+                lossi = losses[0].item()
                 it_losses.append(lossi)
                 tmatch.set_postfix({'loss':lossi})
                 tmatch.update()
             # update base image iteratively
-            I = torch.autograd.Variable(I, requires_grad=True)
-            A = torch.autograd.Variable(A, requires_grad=False)
-            T = torch.autograd.Variable(T, requires_grad=False)
+            Is = [torch.autograd.Variable(I, requires_grad=True) for I in Is]
+            As = [torch.autograd.Variable(A, requires_grad=False) for A in As]
+            Ts = [torch.autograd.Variable(T, requires_grad=False) for T in Ts]
             # TODO: use custom Jacobi method function here instead of fixed GD
             for bit in range(base_image_iters):
-                Itx = interp(I, A, T)
-                loss = criterion(Itx, J)
-                gI, = torch.autograd.grad(loss, I)
-                I = I/world_size - base_image_stepsize * gI
-                dist.all_reduce(I)
-                dist.reduce(loss, 0)
-                lossi = loss.item()
+                losses = []
+                for (i, (I,A,T,J)) in enumerate(zip(Is, As, Ts, Js)):
+                    Itx = interp(I, A, T)
+                    loss = criterion(Itx, J)
+                    losses.append(loss)
+                    gI, = torch.autograd.grad(loss, I)
+                    Is[i] = I/world_size - base_image_stepsize * gI
+                dist.all_reduce_multigpu(Is)
+                dist.reduce_multigpu([l for l in losses], 0)
+                lossi = losses[0].item()
                 it_losses.append(lossi)
                 timage.set_postfix({'loss':lossi})
                 timage.update()

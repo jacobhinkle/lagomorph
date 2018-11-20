@@ -1,3 +1,5 @@
+raise Exception("DEPRECATED: This example has not been updated to use the new pytorch interface")
+
 import torch
 import h5py
 import numpy as np
@@ -6,19 +8,6 @@ import math
 from tqdm import tqdm
 import atexit
 
-
-def standardize(J, A, T, B, C, out=None):
-    """Apply inverse contrast and inverse affine to J to get standardized J"""
-    Ainv, Tinv = lm.invert_affine(A, T)
-    if B is None:
-        return lm.interp_image_affine(J, Ainv, Tinv, out=out)
-    else:
-        # Inverse contrast is simple
-        Binv = 1./B.get()
-        Cinv = -C.get()*Binv
-        Binv = gpuarray.to_gpu(Binv, allocator=B.allocator)
-        Cinv = gpuarray.to_gpu(Cinv, allocator=T.allocator)
-        return lm.interp_image_affine(J, Ainv, Tinv, out=out, B=Binv, C=Cinv)
 
 if __name__ == '__main__':
     border=0

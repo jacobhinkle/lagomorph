@@ -1,11 +1,8 @@
 from .adjrep import *
 from .affine import *
-from .arithmetic import *
-from .atlas import *
 from .deform import *
 from .diff import *
-from .dtypes import *
-from .matching import *
+from .lddmm import *
 from .metric import *
-from .shooting import *
-from .vis import *
+
+from lagomorph_cuda import set_debug_mode

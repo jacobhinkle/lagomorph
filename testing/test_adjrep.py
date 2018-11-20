@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import math
 
-import lagomorph.torch as lt
+import lagomorph as lm
 
 from testing.utils import catch_gradcheck
 
@@ -18,4 +18,4 @@ def test_Ad_star_gradcheck():
             defsh = tuple([bs,dim]+[res]*dim)
             phiinv = torch.randn(defsh, dtype=torch.float64, requires_grad=True).cuda()
             m = torch.randn_like(phiinv)
-            catch_gradcheck(f"Failed Ad_star gradcheck with batch size {bs} dim {dim}", lt.Ad_star, (phiinv,m))
+            catch_gradcheck(f"Failed Ad_star gradcheck with batch size {bs} dim {dim}", lm.Ad_star, (phiinv,m))

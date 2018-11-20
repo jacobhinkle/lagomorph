@@ -1,6 +1,5 @@
-import pycuda.autoinit # fire up pycuda
-from pycuda import gpuarray
-from pycuda.tools import DeviceMemoryPool
+raise Exception("DEPRECATED: This example has not been updated to use the new pytorch interface")
+
 import numpy as np
 
 import lagomorph as lm
@@ -13,6 +12,9 @@ def circle_image(W, H, X, Y, R, dtype=np.float32):
     return np.ascontiguousarray(im.reshape((1,W,H)))
 
 if __name__ == '__main__':
+    import pycuda.autoinit # fire up pycuda
+    from pycuda import gpuarray
+    from pycuda.tools import DeviceMemoryPool
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-N", "--num_iters", type=int, default=10, help="Number of iterations of gradient descent")

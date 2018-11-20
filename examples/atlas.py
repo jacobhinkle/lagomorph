@@ -1,3 +1,5 @@
+raise Exception("DEPRECATED: This example has not been updated to use the new pytorch interface")
+
 from pycuda import gpuarray
 from pycuda.tools import DeviceMemoryPool
 from pycuda.driver import mem_alloc

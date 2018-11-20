@@ -1,0 +1,8 @@
+data*
+*.pth
+*.mp4
+*.h5
+*.npy
+*.npz
+*.dat
+*.png

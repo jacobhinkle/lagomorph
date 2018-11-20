@@ -1,3 +1,5 @@
+raise Exception("DEPRECATED: This example has not been updated to use the new pytorch interface")
+
 import numpy as np
 import h5py
 
