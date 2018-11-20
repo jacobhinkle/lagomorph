@@ -2,7 +2,7 @@
 Adjoint representation for Diff(R^d)
 """
 import numpy as np
-from .diff import jacobian_times_vectorfield
+from .diff import jacobian_times_vectorfield, jacobian_times_vectorfield_adjoint
 from .deform import interp
 
 def ad(v, w):
@@ -42,10 +42,8 @@ def ad_star(v, m):
     Note that this is the numerical adjoint of ad(v,.), which is implemented
     using the common finite difference scheme.
     """
-    return jacobian_times_vectorfield(v, m,
-                displacement=False, transpose=True) \
-         - jacobian_times_vectorfield_adjoint(m, v,
-                displacement=False)
+    return jacobian_times_vectorfield(v, m, displacement=False, transpose=True) \
+         - jacobian_times_vectorfield_adjoint(m, v)
          
 def Ad_star(phiinv, m):
     """
@@ -63,10 +61,8 @@ def Ad_star(phiinv, m):
 # under a metric. These are performed by flatting, applying to dual action,
 # then sharping.
 def ad_dagger(x, y, metric):
-    raise NotImplementedError
     return metric.sharp(ad_star(x, metric.flat(y)))
 def Ad_dagger(phi, y, metric):
-    raise NotImplementedError
     return metric.sharp(Ad_star(phi, metric.flat(y)))
 # The sym operator is a negative symmetrized ad_dagger, and is important for
 # computing reduced Jacobi fields.

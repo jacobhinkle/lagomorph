@@ -267,3 +267,92 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
     }
 }
 
+// This computes the diagonal elements of the Hessian of a sum of squared
+// differences loss with respect to the interpolated image.
+// Note that this implementation uses global atomic adds.
+template<typename Real, BackgroundStrategy backgroundStrategy>
+inline __device__ void interp_hessian_diagonal_image_point(
+        Real* __restrict__ H,
+        Real x, Real y,
+        size_t sizeX, size_t sizeY) {
+    int floorX = (int)(x);
+    int floorY = (int)(y);
+
+    if (x < 0 && x != (int)(x)) --floorX;
+    if (y < 0 && y != (int)(y)) --floorY;
+
+    // this is not truly ceiling, but floor + 1, which is usually ceiling
+    int ceilX = floorX + 1;
+    int ceilY = floorY + 1;
+
+    Real t = x - floorX;
+    Real u = y - floorY;
+
+    Real oneMinusT = 1.f- t;
+    Real oneMinusU = 1.f- u;
+
+    Real w0, w1, w2, w3; // interp weights
+    int ix0, ix1, ix2, ix3; // indices of corners
+    bool inside = 1;
+
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrapBackground(floorX, floorY,
+                       ceilX, ceilY,
+                       sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clampBackground(floorX, floorY,
+                        ceilX, ceilY,
+                        sizeX, sizeY);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+
+        if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+           backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+        }
+
+        inside = isInside(floorX, floorY,
+                          ceilX, ceilY,
+                          sizeX, sizeY);
+    } else {
+        // unknown background strategy, don't allow compilation
+        static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+                  backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                          "Unknown background strategy");
+    }
+
+    ix0 = floorX*sizeY + floorY;
+    ix1 = ceilX *sizeY + floorY;
+    ix2 = ceilX *sizeY + ceilY;
+    ix3 = floorX*sizeY + ceilY;
+
+    // interpolation weights
+    w0 = (oneMinusT * oneMinusU);
+    w1 = (t         * oneMinusU);
+    w2 = (t         * u        );
+    w3 = (oneMinusT * u        );
+
+    if (inside) {
+        // set the diagonal of the Hessian directly
+        atomicAdd(&H[ix0], w0*w0);
+        atomicAdd(&H[ix1], w1*w1);
+        atomicAdd(&H[ix2], w2*w2);
+        atomicAdd(&H[ix3], w3*w3);
+    } else {
+        bool floorXIn = floorX >= 0 && floorX < sizeX;
+        bool floorYIn = floorY >= 0 && floorY < sizeY;
+        bool ceilXIn = ceilX >= 0 && ceilX < sizeX;
+        bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
+
+        if (floorXIn && floorYIn) atomicAdd(&H[ix0], w0*w0);
+        if (ceilXIn && floorYIn) atomicAdd(&H[ix1], w1*w1);
+        if (ceilXIn && ceilYIn) atomicAdd(&H[ix2], w2*w2);
+        if (floorXIn && ceilYIn) atomicAdd(&H[ix3], w3*w3);
+    }
+}

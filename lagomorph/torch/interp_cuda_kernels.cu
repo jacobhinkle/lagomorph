@@ -60,31 +60,19 @@ at::Tensor interp_cuda_forward(
 
     auto out = at::zeros({batch_size, Iv.size(1), Iv.size(2), Iv.size(3)}, Iv.type());
 
-    if (broadcast_I) {
+    LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
         AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_forward", ([&] {
-        interp_kernel_2d<scalar_t, true><<<blocks, threads>>>(
+        interp_kernel_2d<scalar_t, broadcastI><<<blocks, threads>>>(
             out.data<scalar_t>(),
             Iv.data<scalar_t>(),
             u.data<scalar_t>(),
             dt,
-            Iv.size(0),
+            batch_size,
             Iv.size(1),
             Iv.size(2),
             Iv.size(3));
         }));
-    } else {
-        AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_forward", ([&] {
-        interp_kernel_2d<scalar_t, false><<<blocks, threads>>>(
-            out.data<scalar_t>(),
-            Iv.data<scalar_t>(),
-            u.data<scalar_t>(),
-            dt,
-            Iv.size(0),
-            Iv.size(1),
-            Iv.size(2),
-            Iv.size(3));
-        }));
-    }
+    }));
 	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return out;
@@ -161,36 +149,95 @@ std::vector<at::Tensor> interp_cuda_backward(
     at::Tensor d_I = at::zeros_like(Iv);
     at::Tensor d_u = at::zeros_like(u);
 
-    if (broadcast_I) {
-        AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_backward", ([&] {
-        interp_kernel_backward_2d<scalar_t, true, true, true><<<blocks, threads>>>(
-            d_I.data<scalar_t>(),
-            d_u.data<scalar_t>(),
-            grad_out.data<scalar_t>(),
-            Iv.data<scalar_t>(),
-            u.data<scalar_t>(),
-            dt,
-            batch_size,
-            Iv.size(1),
-            Iv.size(2),
-            Iv.size(3));
+    LAGOMORPH_DISPATCH_BOOL(need_I, needI, ([&] {
+        LAGOMORPH_DISPATCH_BOOL(need_u, needu, ([&] {
+            LAGOMORPH_DISPATCH_BOOL(broadcast_I, bcastI, ([&] {
+                AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_backward", ([&] {
+                interp_kernel_backward_2d<scalar_t, bcastI, needI,
+                        needu><<<blocks, threads>>>(
+                    d_I.data<scalar_t>(),
+                    d_u.data<scalar_t>(),
+                    grad_out.data<scalar_t>(),
+                    Iv.data<scalar_t>(),
+                    u.data<scalar_t>(),
+                    dt,
+                    batch_size,
+                    Iv.size(1),
+                    Iv.size(2),
+                    Iv.size(3));
+                }));
+            }));
         }));
-    } else {
-        AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_backward", ([&] {
-        interp_kernel_backward_2d<scalar_t, false, true, true><<<blocks, threads>>>(
-            d_I.data<scalar_t>(),
-            d_u.data<scalar_t>(),
-            grad_out.data<scalar_t>(),
-            Iv.data<scalar_t>(),
-            u.data<scalar_t>(),
-            dt,
-            batch_size,
-            Iv.size(1),
-            Iv.size(2),
-            Iv.size(3));
-        }));
-    }
+    }));
 	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return {d_I, d_u};
+}
+
+// This kernel computes the diagonal of the Hessian with respect to the
+// interpolated image I
+template<typename Real, bool broadcast_I,
+    BackgroundStrategy backgroundStrategy>
+__global__ void interp_hessian_diagonal_image_kernel_2d(
+        Real* __restrict__ out,
+        const Real* __restrict__ I,
+        const Real* __restrict__ u,
+        double dt,
+        size_t nn, size_t nc, size_t nx, size_t ny) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= nx || j >= ny) return;
+    const int nxy = nx*ny;
+    const Real* In = I; // pointer to first channel of input
+    Real* outn = out; // pointer to current vector field v
+    const Real* un = u; // pointer to current vector field v
+    // index of current output point (first component. add nxy for second)
+    int ix = i*ny + j;
+    int iy = ix + nxy;
+    Real fi=static_cast<Real>(i);
+    Real fj=static_cast<Real>(j);
+    for (int n=0; n < nn; ++n) {
+        if (broadcast_I) In = I; // reset to first channel
+        auto hx = fi + dt*un[ix];
+        auto hy = fj + dt*un[iy];
+        for (int c=0; c < nc; ++c) {
+            interp_hessian_diagonal_image_point<Real, backgroundStrategy>(out, hx, hy, nx, ny);
+            // move to next channel/image
+            In += nxy;
+            outn += nxy;
+        }
+        un += 2*nxy;
+    }
+}
+
+at::Tensor interp_hessian_diagonal_image(
+    at::Tensor Iv,
+    at::Tensor u,
+    double dt) {
+    const dim3 threads(32, 32);
+    const dim3 blocks((Iv.size(2) + threads.x - 1) / threads.x,
+                    (Iv.size(3) + threads.y - 1) / threads.y);
+
+    const auto batch_size = (u.size(0) > Iv.size(0)) ? u.size(0) : Iv.size(0);
+
+    const bool broadcast_I = Iv.size(0) < batch_size;
+
+    auto out = at::zeros_like(Iv);
+
+    LAGOMORPH_DISPATCH_BOOL(broadcast_I, bcastI, ([&] {
+        AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_hessian_diagonal_image", ([&] {
+        interp_hessian_diagonal_image_kernel_2d<scalar_t, bcastI, DEFAULT_BACKGROUND_STRATEGY><<<blocks, threads>>>(
+            out.data<scalar_t>(),
+            Iv.data<scalar_t>(),
+            u.data<scalar_t>(),
+            dt,
+            batch_size,
+            Iv.size(1),
+            Iv.size(2),
+            Iv.size(3));
+        }));
+    }));
+	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
+
+    return out;
 }

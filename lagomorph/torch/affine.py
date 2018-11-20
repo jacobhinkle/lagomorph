@@ -22,6 +22,7 @@ class AffineInterpImageFunction(torch.autograd.Function):
                 T.contiguous(),
                 *ctx.needs_input_grad)
         return d_I, d_A, d_T
+affine_interp_image = AffineInterpImageFunction.apply
 
 class AffineInterpImage(torch.nn.Module):
     """Module wrapper for AffineInterpImageFunction"""
@@ -30,34 +31,37 @@ class AffineInterpImage(torch.nn.Module):
     def forward(self, I, A, T):
         return AffineInterpImageFunction.apply(I, A, T)
 
-def Invert2x2(A):
+def invert_2x2(A):
     """Invert 2x2 matrix using simple formula in batch mode.
     This assumes the matrix is invertible and provides no further checks."""
     det = A[:,0,0]*A[:,1,1] - A[:,0,1]*A[:,1,0]
-    Ainv = torch.stack((A[:,1,1],-A[:,1,0],-A[:,0,1],A[:,0,0]), dim=1).view(-1,2,2)/det
+    Ainv = torch.stack((A[:,1,1],-A[:,0,1],-A[:,1,0],A[:,0,0]), dim=1).view(-1,2,2)/det.view(-1,1,1)
     return Ainv
 
-def Invert3x3(A):
+def invert_3x3(A):
     """Invert a 3x3 matrix in batch mode. We use the formula involving
     determinants of minors here
     http://mathworld.wolfram.com/MatrixInverse.html
     """
-    raise NotImplementedError("Invert3x3 not yet implemented")
+    raise NotImplementedError
 
-def AffineInverse(A, T):
-    """Invert an affine transformation"""
+def affine_inverse(A, T):
+    """Invert an affine transformation.
+    
+    A transformation (A,T) is inverted by computing (A^{-1}, -A^{-1} T)
+    """
     assert A.shape[1] == A.shape[2]
     assert A.shape[1] == T.shape[1]
     dim = A.shape[1]
     assert dim == 2 or dim == 3
     if dim == 2:
-        Ainv = Invert2x2(A)
+        Ainv = invert_2x2(A)
     elif dim == 3:
-        Ainv = Invert3x3(A)
+        Ainv = invert_3x3(A)
     Tinv = -torch.matmul(Ainv, T.unsqueeze(2)).squeeze(2)
     return (Ainv, Tinv)
 
-def RotationExpMap(v):
+def rotation_exp_map(v):
     """Convert a collection of tangent vectors to rotation matrices. This allows
     for rigid registration using unconstrained optimization by composing this
     function with the affine interpolation methods and a loss function.
@@ -77,11 +81,11 @@ def RotationExpMap(v):
     else:
         raise Exception(f"Cannot infer dimension from v shape {v.shape}")
 
-def RigidInverse(v, T):
+def rigid_inverse(v, T):
     """Invert a rigid transformation using the formula
         (R(v),T)^{-1} = (R(-v), -R(-v) T)
     """
     negv = -v
-    Rinv = RotationExpMap(negv)
+    Rinv = rotation_exp_map(negv)
     Tinv = -torch.matmul(Rinv, T.unsqueeze(2)).squeeze(2)
     return (negv, Tinv)

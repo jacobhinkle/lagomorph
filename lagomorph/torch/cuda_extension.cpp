@@ -21,6 +21,10 @@ std::vector<at::Tensor> interp_cuda_backward(
     double dt,
     bool need_I,
     bool need_u);
+at::Tensor interp_hessian_diagonal_image(
+    at::Tensor Iv,
+    at::Tensor u,
+    double dt);
 at::Tensor affine_interp_image_cuda_forward(
     at::Tensor I,
     at::Tensor A,
@@ -145,6 +149,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("fluid_operator", &fluid_operator, "Fluid forward and inverse FFT operator");
   m.def("interp_forward", &interp_forward, "Free-form interp forward (CUDA)");
   m.def("interp_backward", &interp_backward, "Free-form interp backward (CUDA)");
+  m.def("interp_hessian_diagonal_image", &interp_hessian_diagonal_image, "Hessian diagonal of free-form interp forward (CUDA)");
   m.def("jacobian_times_vectorfield_forward", &jacobian_times_vectorfield_forward, "Jacobian times vector field forward (CUDA)");
   m.def("jacobian_times_vectorfield_backward", &jacobian_times_vectorfield_backward, "Jacobian times vector field backward (CUDA)");
   m.def("jacobian_times_vectorfield_adjoint_forward", &jacobian_times_vectorfield_adjoint_forward, "Jacobian times vector field adjoint forward (CUDA)");

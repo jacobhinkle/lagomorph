@@ -41,6 +41,10 @@ class InterpFunction(torch.autograd.Function):
 def interp(I, u, dt=1.0):
     return InterpFunction.apply(I, u, dt)
 
+def interp_hessian_diagonal_image(I, u, dt=1.0):
+    """Return the Hessian diagonal with respect to I of interp(I,u,dt)"""
+    return lagomorph_torch_cuda.interp_hessian_diagonal_image(I, u, dt)
+
 def compose(u, v, ds=1.0, dt=1.0):
     """Return ds*u(x) + dt*v(x + ds*u(x))"""
     return ds*u + dt*interp(v, u, dt=ds)

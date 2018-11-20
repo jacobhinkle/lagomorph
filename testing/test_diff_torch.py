@@ -59,12 +59,12 @@ def test_jacobian_times_vectorfield_adjoint():
             defsh = tuple([bs,dim]+[res]*dim)
             u = torch.randn(defsh, dtype=torch.float64).cuda()
             v = torch.randn_like(u)
-            w = torch.randn_like(u)
+            m = torch.randn_like(u)
             Duv = lt.jacobian_times_vectorfield(u, v, displacement=False, transpose=False)
-            Duvw = (Duv*w).sum()
-            adjvw = lt.jacobian_times_vectorfield_adjoint(w, v)
-            uadjvw = (u*adjvw).sum()
-            assert torch.allclose(Duvw, uadjvw), (f"Failed jacobian_times_vectorfield_adjoint adjoint check with "
+            Duvm = (Duv*m).sum()
+            adjvm = lt.jacobian_times_vectorfield_adjoint(m, v)
+            uadjvm = (u*adjvm).sum()
+            assert torch.allclose(Duvm, uadjvm), (f"Failed jacobian_times_vectorfield_adjoint adjoint check with "
             f"batch size={bs} dim={dim}")
 
 def test_jacobian_times_vectorfield_adjoint_gradcheck():
