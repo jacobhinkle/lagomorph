@@ -2,7 +2,7 @@
 Fluid and other LDDMM metrics
 """
 import torch
-import lagomorph_torch_cuda
+import lagomorph_cuda
 import numpy as np
 
 class FluidMetricOperator(torch.autograd.Function):
@@ -15,7 +15,7 @@ class FluidMetricOperator(torch.autograd.Function):
         sh = mv.shape
         spatial_dim = len(sh)-2
         Fmv = torch.rfft(mv, spatial_dim, normalized=True)
-        lagomorph_torch_cuda.fluid_operator(Fmv, inverse,
+        lagomorph_cuda.fluid_operator(Fmv, inverse,
                 luts['cos'], luts['sin'], *params, *cutoffs)
         return torch.irfft(Fmv, spatial_dim, normalized=True,
                 signal_sizes=sh[2:])
@@ -24,7 +24,7 @@ class FluidMetricOperator(torch.autograd.Function):
         sh = outgrad.shape
         spatial_dim = len(sh)-2
         Fmv = torch.rfft(outgrad, spatial_dim, normalized=True)
-        lagomorph_torch_cuda.fluid_operator(Fmv, ctx.inverse,
+        lagomorph_cuda.fluid_operator(Fmv, ctx.inverse,
                 ctx.luts['cos'], ctx.luts['sin'], *ctx.params, *ctx.cutoffs)
         return None, None, None, None, torch.irfft(Fmv, spatial_dim, normalized=True,
                 signal_sizes=sh[2:])

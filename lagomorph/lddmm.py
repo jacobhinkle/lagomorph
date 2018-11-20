@@ -6,7 +6,6 @@ import torch
 import numpy as np
 from . import deform
 from . import adjrep
-import lagomorph_torch_cuda
 import math
 
 def expmap_advect(metric, m, T=1.0, num_steps=10, phiinv=None):

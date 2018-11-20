@@ -1,5 +1,5 @@
 import torch
-import lagomorph_torch_cuda
+import lagomorph_cuda
 import numpy as np
 import math
 
@@ -20,11 +20,11 @@ class JacobianTimesVectorFieldFunction(torch.autograd.Function):
         ctx.displacement = displacement
         ctx.transpose = transpose
         ctx.save_for_backward(v, w)
-        return lagomorph_torch_cuda.jacobian_times_vectorfield_forward(v, w, displacement, transpose)
+        return lagomorph_cuda.jacobian_times_vectorfield_forward(v, w, displacement, transpose)
     @staticmethod
     def backward(ctx, gradout):
         v, w = ctx.saved_tensors
-        d_v, d_w = lagomorph_torch_cuda.jacobian_times_vectorfield_backward(gradout, v, w, ctx.displacement, ctx.transpose, *ctx.needs_input_grad[:2])
+        d_v, d_w = lagomorph_cuda.jacobian_times_vectorfield_backward(gradout, v, w, ctx.displacement, ctx.transpose, *ctx.needs_input_grad[:2])
         return d_v, d_w, None, None
 def jacobian_times_vectorfield(v, w, displacement=True, transpose=False):
     return JacobianTimesVectorFieldFunction.apply(v, w, displacement, transpose)
@@ -40,10 +40,10 @@ class JacobianTimesVectorFieldAdjointFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, v, w):
         ctx.save_for_backward(v, w)
-        return lagomorph_torch_cuda.jacobian_times_vectorfield_adjoint_forward(v, w)
+        return lagomorph_cuda.jacobian_times_vectorfield_adjoint_forward(v, w)
     @staticmethod
     def backward(ctx, gradout):
         v, w = ctx.saved_tensors
-        d_v, d_w = lagomorph_torch_cuda.jacobian_times_vectorfield_adjoint_backward(gradout, v, w, *ctx.needs_input_grad[:2])
+        d_v, d_w = lagomorph_cuda.jacobian_times_vectorfield_adjoint_backward(gradout, v, w, *ctx.needs_input_grad[:2])
         return d_v, d_w, None
 jacobian_times_vectorfield_adjoint = JacobianTimesVectorFieldAdjointFunction.apply

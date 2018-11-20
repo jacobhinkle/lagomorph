@@ -1,5 +1,5 @@
 import torch
-import lagomorph_torch_cuda
+import lagomorph_cuda
 
 class AffineInterpImageFunction(torch.autograd.Function):
     """Interpolate an image using an affine transformation, parametrized by a
@@ -8,14 +8,14 @@ class AffineInterpImageFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, I, A, T):
         ctx.save_for_backward(I, A, T)
-        return lagomorph_torch_cuda.affine_interp_image_forward(
+        return lagomorph_cuda.affine_interp_image_forward(
             I.contiguous(),
             A.contiguous(),
             T.contiguous())
     @staticmethod
     def backward(ctx, grad_out):
         I, A, T = ctx.saved_tensors
-        d_I, d_A, d_T = lagomorph_torch_cuda.affine_interp_image_backward(
+        d_I, d_A, d_T = lagomorph_cuda.affine_interp_image_backward(
                 grad_out.contiguous(),
                 I.contiguous(),
                 A.contiguous(),
