@@ -4,6 +4,10 @@ import math
 
 import lagomorph as lm
 
+# This enables cuda error checking in lagomorph which causes kernels to
+# synchronize, which is why it's disabled by default
+lm.set_debug_mode(True)
+
 from testing.utils import catch_gradcheck
 
 np.random.seed(1)

@@ -1,35 +1,35 @@
 import torch
 import lagomorph_cuda
 
-class AffineInterpImageFunction(torch.autograd.Function):
+class AffineInterpFunction(torch.autograd.Function):
     """Interpolate an image using an affine transformation, parametrized by a
     separate matrix and translation vector.
     """
     @staticmethod
     def forward(ctx, I, A, T):
         ctx.save_for_backward(I, A, T)
-        return lagomorph_cuda.affine_interp_image_forward(
+        return lagomorph_cuda.affine_interp_forward(
             I.contiguous(),
             A.contiguous(),
             T.contiguous())
     @staticmethod
     def backward(ctx, grad_out):
         I, A, T = ctx.saved_tensors
-        d_I, d_A, d_T = lagomorph_cuda.affine_interp_image_backward(
+        d_I, d_A, d_T = lagomorph_cuda.affine_interp_backward(
                 grad_out.contiguous(),
                 I.contiguous(),
                 A.contiguous(),
                 T.contiguous(),
                 *ctx.needs_input_grad)
         return d_I, d_A, d_T
-affine_interp_image = AffineInterpImageFunction.apply
+affine_interp = AffineInterpFunction.apply
 
-class AffineInterpImage(torch.nn.Module):
-    """Module wrapper for AffineInterpImageFunction"""
+class AffineInterp(torch.nn.Module):
+    """Module wrapper for AffineInterpFunction"""
     def __init__(self):
-        super(AffineInterpImage, self).__init__()
+        super(AffineInterp, self).__init__()
     def forward(self, I, A, T):
-        return AffineInterpImageFunction.apply(I, A, T)
+        return AffineInterpFunction.apply(I, A, T)
 
 def invert_2x2(A):
     """Invert 2x2 matrix using simple formula in batch mode.

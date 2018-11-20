@@ -17,12 +17,12 @@ const auto INTERP_BACKWARD_NUM_THREADS =
 
 
 template<typename Real, bool broadcast_I, bool use_contrast>
-__global__ void affine_interp_image_kernel_2d(
+__global__ void affine_interp_kernel_2d(
         Real* __restrict__ out,
         const Real* __restrict__ I,
         const Real* __restrict__ A, const Real* __restrict__ T,
         const Real* __restrict__ B, const Real* __restrict__ C,
-        size_t nn, size_t nx, size_t ny) {
+        size_t nn, size_t nc, size_t nx, size_t ny) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
     if (i >= nx || j >= ny) return;
@@ -44,20 +44,21 @@ __global__ void affine_interp_image_kernel_2d(
     Real hx, hy;
     Real Inx;
     for (int n=0; n < nn; ++n) {
+        if (broadcast_I) In = I;
         // apply affine transform to map i, j to lookup point
         hx = An[0]*fi + An[1]*fj + Tn[0] + ox;
         hy = An[2]*fi + An[3]*fj + Tn[1] + oy;
-        Inx = biLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
-            hx, hy,
-            nx, ny);
-        if (use_contrast) {
-            Inx = Bn[0]*Inx + Cn[0];
-        }
-        outn[ix] = Inx;
-
-        if (!broadcast_I)
+        for (int c=0; c < nc; ++c) {
+            Inx = biLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
+                hx, hy,
+                nx, ny);
+            if (use_contrast) {
+                Inx = Bn[0]*Inx + Cn[0];
+            }
+            outn[ix] = Inx;
+            outn += nxy;
             In += nxy;
-        outn += nxy;
+        }
         An += 4;
         Tn += 2;
         if (use_contrast) {
@@ -67,12 +68,11 @@ __global__ void affine_interp_image_kernel_2d(
     }
 }
 
-at::Tensor affine_interp_image_cuda_forward(
+at::Tensor affine_interp_cuda_forward(
     at::Tensor I,
     at::Tensor A,
     at::Tensor T) {
     AT_ASSERTM(A.size(0) == T.size(0), "A and T must have same first dimension")
-    AT_ASSERTM(I.size(1) == 1, "Multi-channel affine interpolation not supported")
     AT_ASSERTM(I.dim() == 4, "Only two-dimensional affine interpolation is supported")
 
     const dim3 threads(32, 32);
@@ -84,8 +84,8 @@ at::Tensor affine_interp_image_cuda_forward(
     auto Itx = at::zeros({A.size(0), I.size(1), I.size(2), I.size(3)}, I.type());
 
     LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
-        AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_image_cuda_forward", ([&] {
-        affine_interp_image_kernel_2d<scalar_t, broadcastI, false><<<blocks, threads>>>(
+        AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_forward", ([&] {
+        affine_interp_kernel_2d<scalar_t, broadcastI, false><<<blocks, threads>>>(
             Itx.data<scalar_t>(),
             I.data<scalar_t>(),
             A.data<scalar_t>(),
@@ -93,6 +93,7 @@ at::Tensor affine_interp_image_cuda_forward(
             NULL,
             NULL,
             A.size(0),
+            I.size(1),
             I.size(2),
             I.size(3));
         }));
@@ -104,7 +105,7 @@ at::Tensor affine_interp_image_cuda_forward(
 
 template<typename Real, bool broadcast_I, bool use_contrast,
     bool need_I, bool need_A, bool need_T>
-__global__ void affine_interp_image_kernel_backward_2d(
+__global__ void affine_interp_kernel_backward_2d(
         Real* __restrict__ d_I,
         Real* __restrict__ d_A,
         Real* __restrict__ d_T,
@@ -114,10 +115,11 @@ __global__ void affine_interp_image_kernel_backward_2d(
         const Real* __restrict__ T,
         const Real* __restrict__ B,
         const Real* __restrict__ C,
-        size_t nn, size_t nx, size_t ny) {
-    const auto ii = blockDim.x*blockIdx.x + threadIdx.x;
-    const auto jj = blockDim.y*blockIdx.y + threadIdx.y;
-    const auto n = blockIdx.z;
+        size_t nn, size_t nc, size_t nx, size_t ny) {
+    const auto ii = threadIdx.x;
+    const auto jj = threadIdx.y;
+    const auto n = blockIdx.y;
+    const auto c = blockIdx.z;
     // get a linear thread index to index into the shared arrays
     int tid = threadIdx.x*blockDim.y + threadIdx.y;
     const auto THREADS_PER_BLOCK = INTERP_BACKWARD_NUM_THREADS;
@@ -134,14 +136,15 @@ __global__ void affine_interp_image_kernel_backward_2d(
     Real dlA11i = 0;
     Real dlT0i = 0;
     Real dlT1i = 0;
-    const size_t nnxy = n*nx*ny;
-    const Real* In = I;
-    Real* d_In = d_I;
+    const size_t cxy = c*nx*ny;
+    const size_t nncxy = n*nc*nx*ny;
+    const Real* gon = grad_out + nncxy + cxy;
+    Real* d_In = d_I + cxy;
+    const Real* In = I +cxy;
     if (!broadcast_I) {
-        In += nnxy;
-        d_In += nnxy;
+        In += nncxy;
+        d_In += nncxy;
     }
-    const Real* gon = grad_out + nnxy;
     const Real* An = A + 4*n;
     const Real* Tn = T + 2*n;
     const Real* Bn = B + n;
@@ -240,21 +243,34 @@ __global__ void affine_interp_image_kernel_backward_2d(
         INTERP_BACKWARD_REDUCE_BLOCK(2)
         INTERP_BACKWARD_REDUCE_BLOCK(1)
         if (tid == 0) {
-            if (need_A) {
-                d_An[0] = dlA00[0];
-                d_An[1] = dlA01[0];
-                d_An[2] = dlA10[0];
-                d_An[3] = dlA11[0];
-            }
-            if (need_T) {
-                d_Tn[0] = dlT0[0];
-                d_Tn[1] = dlT1[0];
+            if (nc == 1) {
+                if (need_A) {
+                    d_An[0] = dlA00[0];
+                    d_An[1] = dlA01[0];
+                    d_An[2] = dlA10[0];
+                    d_An[3] = dlA11[0];
+                }
+                if (need_T) {
+                    d_Tn[0] = dlT0[0];
+                    d_Tn[1] = dlT1[0];
+                }
+            } else {
+                if (need_A) {
+                    atomicAdd(&d_An[0], dlA00[0]);
+                    atomicAdd(&d_An[1], dlA01[0]);
+                    atomicAdd(&d_An[2], dlA10[0]);
+                    atomicAdd(&d_An[3], dlA11[0]);
+                }
+                if (need_T) {
+                    atomicAdd(&d_Tn[0], dlT0[0]);
+                    atomicAdd(&d_Tn[1], dlT1[0]);
+                }
             }
         }
     }
 }
 
-std::vector<at::Tensor> affine_interp_image_cuda_backward(
+std::vector<at::Tensor> affine_interp_cuda_backward(
     at::Tensor grad_out,
     at::Tensor I,
     at::Tensor A,
@@ -262,13 +278,15 @@ std::vector<at::Tensor> affine_interp_image_cuda_backward(
     bool need_I,
     bool need_A,
     bool need_T) {
+    AT_ASSERTM(I.size(1) == grad_out.size(1), "I and grad_out must have same number of channels")
+
     // avoid allocating memory for gradients we don't need to compute
 	auto d_I = need_I ? at::zeros_like(I) : at::zeros({0}, I.type());
 	auto d_A = need_A ? at::zeros_like(A) : at::zeros({0}, A.type());
 	auto d_T = need_T ? at::zeros_like(T) : at::zeros({0}, T.type());
 
     const auto threads = INTERP_BACKWARD_THREADS;
-    const dim3 blocks(1,1,A.size(0));
+    const dim3 blocks(1, A.size(0), I.size(1));
 
     const bool broadcast_I = I.size(0) == 1 && grad_out.size(0) > 1;
 
@@ -276,8 +294,8 @@ std::vector<at::Tensor> affine_interp_image_cuda_backward(
     LAGOMORPH_DISPATCH_BOOL(need_A, needA, ([&] {
     LAGOMORPH_DISPATCH_BOOL(need_T, needT, ([&] {
     LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
-        AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_image_cuda_backward", ([&] {
-        affine_interp_image_kernel_backward_2d<scalar_t, broadcastI, false, needI, needA, needT><<<blocks, threads>>>(
+        AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_backward", ([&] {
+        affine_interp_kernel_backward_2d<scalar_t, broadcastI, false, needI, needA, needT><<<blocks, threads>>>(
             d_I.data<scalar_t>(),
             d_A.data<scalar_t>(),
             d_T.data<scalar_t>(),
@@ -288,6 +306,7 @@ std::vector<at::Tensor> affine_interp_image_cuda_backward(
             NULL,
             NULL,
             grad_out.size(0),
+            grad_out.size(1),
             grad_out.size(2),
             grad_out.size(3));
         }));

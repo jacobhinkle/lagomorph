@@ -25,11 +25,11 @@ at::Tensor interp_hessian_diagonal_image(
     at::Tensor Iv,
     at::Tensor u,
     double dt);
-at::Tensor affine_interp_image_cuda_forward(
+at::Tensor affine_interp_cuda_forward(
     at::Tensor I,
     at::Tensor A,
     at::Tensor T);
-std::vector<at::Tensor> affine_interp_image_cuda_backward(
+std::vector<at::Tensor> affine_interp_cuda_backward(
     at::Tensor grad_out,
     at::Tensor I,
     at::Tensor A,
@@ -75,17 +75,17 @@ void set_debug_mode(bool mode) {
     lagomorph_debug_mode = mode;
 }
 
-at::Tensor affine_interp_image_forward(
+at::Tensor affine_interp_forward(
         at::Tensor I,
         at::Tensor A,
         at::Tensor T) {
     CHECK_INPUT(I);
     CHECK_INPUT(A);
     CHECK_INPUT(T);
-    return affine_interp_image_cuda_forward(I, A, T);
+    return affine_interp_cuda_forward(I, A, T);
 }
 
-std::vector<at::Tensor> affine_interp_image_backward(
+std::vector<at::Tensor> affine_interp_backward(
         at::Tensor grad_out,
         at::Tensor I,
         at::Tensor A,
@@ -97,7 +97,7 @@ std::vector<at::Tensor> affine_interp_image_backward(
     CHECK_INPUT(I);
     CHECK_INPUT(A);
     CHECK_INPUT(T);
-    return affine_interp_image_cuda_backward(grad_out, I, A, T, need_I, need_A, need_T);
+    return affine_interp_cuda_backward(grad_out, I, A, T, need_I, need_A, need_T);
 }
 
 at::Tensor interp_forward(
@@ -144,8 +144,8 @@ void fluid_operator(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("set_debug_mode", &set_debug_mode, "Set debug (sync) mode");
-  m.def("affine_interp_image_forward", &affine_interp_image_forward, "Affine interp image forward (CUDA)");
-  m.def("affine_interp_image_backward", &affine_interp_image_backward, "Affine interp image backward (CUDA)");
+  m.def("affine_interp_forward", &affine_interp_forward, "Affine interp forward (CUDA)");
+  m.def("affine_interp_backward", &affine_interp_backward, "Affine interp backward (CUDA)");
   m.def("fluid_operator", &fluid_operator, "Fluid forward and inverse FFT operator");
   m.def("interp_forward", &interp_forward, "Free-form interp forward (CUDA)");
   m.def("interp_backward", &interp_backward, "Free-form interp backward (CUDA)");
