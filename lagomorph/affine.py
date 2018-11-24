@@ -31,19 +31,44 @@ class AffineInterp(torch.nn.Module):
     def forward(self, I, A, T):
         return AffineInterpFunction.apply(I, A, T)
 
+def det_2x2(A):
+    return A[:,0,0]*A[:,1,1] - A[:,0,1]*A[:,1,0]
+
 def invert_2x2(A):
     """Invert 2x2 matrix using simple formula in batch mode.
     This assumes the matrix is invertible and provides no further checks."""
-    det = A[:,0,0]*A[:,1,1] - A[:,0,1]*A[:,1,0]
+    det = det_2x2(A)
     Ainv = torch.stack((A[:,1,1],-A[:,0,1],-A[:,1,0],A[:,0,0]), dim=1).view(-1,2,2)/det.view(-1,1,1)
     return Ainv
+
+def minor(A, i, j):
+    assert A.shape[1] == A.shape[2]
+    n = A.shape[1]
+    M = torch.cat((A.narrow(1, 0, i), A.narrow(1,i+1,n-i-1)), dim=1)
+    M = torch.cat((M.narrow(2, 0, j), M.narrow(2,j+1,n-j-1)), dim=2)
+    return M
 
 def invert_3x3(A):
     """Invert a 3x3 matrix in batch mode. We use the formula involving
     determinants of minors here
     http://mathworld.wolfram.com/MatrixInverse.html
     """
-    raise NotImplementedError
+    cofactors = torch.stack((
+        det_2x2(minor(A,0,0)),
+       -det_2x2(minor(A,0,1)),
+        det_2x2(minor(A,0,2)),
+       -det_2x2(minor(A,1,0)),
+        det_2x2(minor(A,1,1)),
+       -det_2x2(minor(A,1,2)),
+        det_2x2(minor(A,2,0)),
+       -det_2x2(minor(A,2,1)),
+        det_2x2(minor(A,2,2)),
+        ), dim=1).view(-1,3,3).transpose(1,2)
+    # write determinant using minors matrix
+    det =   cofactors[:,0,0]*A[:,0,0] \
+          + cofactors[:,1,0]*A[:,0,1] \
+          + cofactors[:,2,0]*A[:,0,2]
+    return cofactors/det.view(-1,1,1)
 
 def affine_inverse(A, T):
     """Invert an affine transformation.
