@@ -13,10 +13,10 @@ and 3D deformable image registration, atlas building, etc. a main goal.
 
 # Installation
 
-To install, simply run the following from the top level of this repository:
+To install, simply run the following:
 
 ```
-pip install --upgrade .
+pip install lagomorph
 ```
 
 This will pull in the following prerequisites:
@@ -28,7 +28,7 @@ Note that often it is necessary to install `numpy` manually first using `pip
 install numpy` due to weirdness in numpy's packaging.
 
 To run the test suite for lagomorph, execute the following command from the
-current directory:
+current directory in this repository:
 
 ```
 python setup.py test
