@@ -68,36 +68,117 @@ __global__ void affine_interp_kernel_2d(
     }
 }
 
+template<typename Real, bool broadcast_I, bool use_contrast>
+__global__ void affine_interp_kernel_3d(
+        Real* __restrict__ out,
+        const Real* __restrict__ I,
+        const Real* __restrict__ A, const Real* __restrict__ T,
+        const Real* __restrict__ B, const Real* __restrict__ C,
+        size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= nx || j >= ny) return;
+    // get a linear thread index to index into the shared arrays
+    const int nxyz = nx*ny*nz;
+    const Real* In = I; // pointer to current vector field v
+    Real* outn = out; // pointer to current vector field v
+    const Real* An = A; // pointer to current vector field v
+    const Real* Tn = T; // pointer to current vector field v
+    const Real* Bn = B;
+    const Real* Cn = C;
+    // index of current output point (first component. add nxy for second)
+    int ix = (i*ny + j)*nz;
+    // center of rotation
+    Real ox = .5*static_cast<Real>(nx-1);
+    Real oy = .5*static_cast<Real>(ny-1);
+    Real oz = .5*static_cast<Real>(nz-1);
+    Real fi=static_cast<Real>(i)-ox;
+    Real fj=static_cast<Real>(j)-oy;
+    Real hx, hy, hz;
+    Real Inx;
+    for (int n=0; n < nn; ++n) {
+        if (broadcast_I) In = I;
+        else In = I + n*nc*nxyz;
+        outn = out + n*nc*nxyz;
+        for (int k=0; k < nz; ++k) {
+            // apply affine transform to map i, j to lookup point
+            Real fk=static_cast<Real>(k)-oz;
+            hx = An[0]*fi + An[1]*fj + An[2]*fk + Tn[0] + ox;
+            hy = An[3]*fi + An[4]*fj + An[5]*fk + Tn[1] + oy;
+            hz = An[6]*fi + An[7]*fj + An[8]*fk + Tn[2] + oz;
+            for (int c=0; c < nc; ++c) {
+                Inx = triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
+                    hx, hy, hz,
+                    nx, ny, nz);
+                if (use_contrast) {
+                    Inx = Bn[0]*Inx + Cn[0];
+                }
+                outn[ix + k] = Inx;
+                In += nxyz;
+                outn += nxyz;
+            }
+        }
+        An += 9;
+        Tn += 3;
+        if (use_contrast) {
+            Bn++;
+            Cn++;
+        }
+    }
+}
+
 at::Tensor affine_interp_cuda_forward(
     at::Tensor I,
     at::Tensor A,
     at::Tensor T) {
     AT_ASSERTM(A.size(0) == T.size(0), "A and T must have same first dimension")
-    AT_ASSERTM(I.dim() == 4, "Only two-dimensional affine interpolation is supported")
+    auto d = I.dim() - 2;
+    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported")
 
-    const dim3 threads(32, 32);
+    const dim3 threads(16, 32);
     const dim3 blocks((I.size(2) + threads.x - 1) / threads.x,
                     (I.size(3) + threads.y - 1) / threads.y);
 
     const bool broadcast_I = I.size(0) == 1 && A.size(0) > 1;
 
-    auto Itx = at::zeros({A.size(0), I.size(1), I.size(2), I.size(3)}, I.type());
+    at::Tensor Itx;
 
-    LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
-        AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_forward", ([&] {
-        affine_interp_kernel_2d<scalar_t, broadcastI, false><<<blocks, threads>>>(
-            Itx.data<scalar_t>(),
-            I.data<scalar_t>(),
-            A.data<scalar_t>(),
-            T.data<scalar_t>(),
-            NULL,
-            NULL,
-            A.size(0),
-            I.size(1),
-            I.size(2),
-            I.size(3));
+    if (d == 2) {
+        Itx = at::zeros({A.size(0), I.size(1), I.size(2), I.size(3)}, I.type());
+        LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
+            AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_forward", ([&] {
+            affine_interp_kernel_2d<scalar_t, broadcastI, false><<<blocks, threads>>>(
+                Itx.data<scalar_t>(),
+                I.data<scalar_t>(),
+                A.data<scalar_t>(),
+                T.data<scalar_t>(),
+                NULL,
+                NULL,
+                A.size(0),
+                I.size(1),
+                I.size(2),
+                I.size(3));
+            }));
         }));
-    }));
+    } else {
+        Itx = at::zeros({A.size(0), I.size(1), I.size(2), I.size(3), I.size(4)}, I.type());
+        LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
+            AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_forward", ([&] {
+            affine_interp_kernel_3d<scalar_t, broadcastI, false><<<blocks, threads>>>(
+                Itx.data<scalar_t>(),
+                I.data<scalar_t>(),
+                A.data<scalar_t>(),
+                T.data<scalar_t>(),
+                NULL,
+                NULL,
+                A.size(0),
+                I.size(1),
+                I.size(2),
+                I.size(3),
+                I.size(4));
+            }));
+        }));
+    }
 	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return Itx;

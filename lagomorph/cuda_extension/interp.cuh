@@ -55,6 +55,74 @@ inline __device__ Real biLerp(const Real* __restrict__ img,
                          u         * v2);
 }
 
+// Trilerp function for single array input
+template<typename Real, BackgroundStrategy backgroundStrategy>
+inline __device__ Real triLerp(const Real* __restrict__ img,
+	Real x, Real y, Real z,
+	size_t sizeX, size_t sizeY, size_t sizeZ)
+{
+    auto floorX = (int)(x);
+    auto floorY = (int)(y);
+    auto floorZ = (int)(z);
+
+    if (x < 0 && x != (int)(x)) --floorX;
+    if (y < 0 && y != (int)(y)) --floorY;
+    if (z < 0 && z != (int)(z)) --floorZ;
+
+    // this is not truly ceiling, but floor + 1, which is usually ceiling
+    auto ceilX = floorX + 1;
+    auto ceilY = floorY + 1;
+    auto ceilZ = floorZ + 1;
+
+    Real t = x - floorX;
+    Real u = y - floorY;
+    Real v = z - floorZ;
+
+    Real oneMinusT = 1.f- t;
+    Real oneMinusU = 1.f- u;
+    Real oneMinusV = 1.f- v;
+
+    Real v0, v1, v2, v3, v4, v5, v6, v7;
+
+    clampBackground(floorX, floorY, floorZ,
+                    ceilX, ceilY, ceilZ,
+                    sizeX, sizeY, sizeZ);
+
+    v0 = get_pixel(floorX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
+    v1 = get_pixel(ceilX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
+    v2 = get_pixel(ceilX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
+    v3 = get_pixel(floorX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
+    v4 = get_pixel(floorX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
+    v5 = get_pixel(ceilX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
+    v6 = get_pixel(ceilX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
+    v7 = get_pixel(floorX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
+
+    //
+    // this is the basic trilerp function...
+    //
+    //     h =
+    //       v0 * (1 - t) * (1 - u) * (1 - v) +
+    //       v1 * t       * (1 - u) * (1 - v) +
+    //       v2 * t       * u       * (1 - v) +
+    //       v3 * (1 - t) * u       * (1 - v) +
+    //       v4 * (1 - t) * (1 - u) * v       +
+    //       v5 * t       * (1 - u) * v       +
+    //       v6 * t       * u       * v       +
+    //       v7 * (1 - t) * u       * v
+    //
+    // the following nested version saves 10 multiplies.
+    //
+    return oneMinusV * (oneMinusU * (oneMinusT * v0  +
+                                     t         * v1) +
+                        u         * (oneMinusT * v3  +
+                                     t         * v2) ) +
+           v         * (oneMinusU * (oneMinusT * v4  +
+                                     t         * v5) +
+                        u         * (oneMinusT * v7  +
+                                     t         * v6) );
+}
+
+
 
 // Bilerp function for single array input
 template<typename Real, BackgroundStrategy backgroundStrategy>
