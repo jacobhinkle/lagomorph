@@ -17,6 +17,19 @@ dims = [2,3] # which dimensions to test
 channels = [1,2,4] # numbers of channels to test
 batch_sizes = [1,2] # which batch sizes to test
 
+def test_affine_interp_identity():
+    for bs in batch_sizes:
+        for dim in dims:
+            for c in channels:
+                imsh = tuple([bs,c]+[res]*dim)
+                I = torch.randn(imsh, dtype=torch.float64, requires_grad=True).cuda()
+                A = torch.zeros((bs,dim,dim), dtype=I.dtype, requires_grad=False).to(I.device)
+                T = torch.zeros((bs,dim), dtype=I.dtype, requires_grad=False).to(I.device)
+                for i in range(dim):
+                    A[:,i,i] = 1
+                IAT = lm.affine_interp(I, A, T)
+                assert torch.allclose(IAT, I), \
+                        f"Affine interp by identity is non-trivial with batch size {bs} dim {dim} channels {c}"
 def test_affine_interp_gradcheck_I():
     for bs in batch_sizes:
         for dim in dims:

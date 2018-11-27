@@ -190,7 +190,6 @@ __global__ void affine_interp_kernel_backward_2d(
     __shared__ Real dlA11[THREADS_PER_BLOCK];
     __shared__ Real dlT0[THREADS_PER_BLOCK];
     __shared__ Real dlT1[THREADS_PER_BLOCK];
-    // initialize shmem
     Real dlA00i = 0;
     Real dlA01i = 0;
     Real dlA10i = 0;
@@ -270,7 +269,7 @@ __global__ void affine_interp_kernel_backward_2d(
         static_assert(THREADS_PER_BLOCK <= 1024, "THREADS_PER_BLOCK > 1024 not supported");
         // ensure counterpart in second half of arrays is not outside
         // pixel domain
-#define INTERP_BACKWARD_REDUCE_BLOCK(N) \
+#define AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(N) \
         if (THREADS_PER_BLOCK > N) { \
             if (tid < N) { \
                 if (need_A) { \
@@ -286,16 +285,16 @@ __global__ void affine_interp_kernel_backward_2d(
             } \
             __syncthreads(); \
         }
-        INTERP_BACKWARD_REDUCE_BLOCK(512)
-        INTERP_BACKWARD_REDUCE_BLOCK(256)
-        INTERP_BACKWARD_REDUCE_BLOCK(128)
-        INTERP_BACKWARD_REDUCE_BLOCK(64)
-        INTERP_BACKWARD_REDUCE_BLOCK(32)
-        INTERP_BACKWARD_REDUCE_BLOCK(16)
-        INTERP_BACKWARD_REDUCE_BLOCK(8)
-        INTERP_BACKWARD_REDUCE_BLOCK(4)
-        INTERP_BACKWARD_REDUCE_BLOCK(2)
-        INTERP_BACKWARD_REDUCE_BLOCK(1)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(512)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(256)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(128)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(64)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(32)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(16)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(8)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(4)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(2)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_2D(1)
         if (tid == 0) {
             if (nc == 1) {
                 if (need_A) {
@@ -324,6 +323,214 @@ __global__ void affine_interp_kernel_backward_2d(
     }
 }
 
+template<typename Real, bool broadcast_I,
+    bool need_I, bool need_A, bool need_T>
+__global__ void affine_interp_kernel_backward_3d(
+        Real* __restrict__ d_I,
+        Real* __restrict__ d_A,
+        Real* __restrict__ d_T,
+        const Real* __restrict__ grad_out,
+        const Real* __restrict__ I,
+        const Real* __restrict__ A,
+        const Real* __restrict__ T,
+        const Real* __restrict__ B,
+        const Real* __restrict__ C,
+        size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
+    const auto ii = threadIdx.x;
+    const auto jj = threadIdx.y;
+    const auto n = blockIdx.y;
+    const auto c = blockIdx.z;
+    // get a linear thread index to index into the shared arrays
+    int tid = threadIdx.x*blockDim.y + threadIdx.y;
+    const auto THREADS_PER_BLOCK = INTERP_BACKWARD_NUM_THREADS;
+    __shared__ Real dlA00[THREADS_PER_BLOCK];
+    __shared__ Real dlA01[THREADS_PER_BLOCK];
+    __shared__ Real dlA02[THREADS_PER_BLOCK];
+    __shared__ Real dlA10[THREADS_PER_BLOCK];
+    __shared__ Real dlA11[THREADS_PER_BLOCK];
+    __shared__ Real dlA12[THREADS_PER_BLOCK];
+    __shared__ Real dlA20[THREADS_PER_BLOCK];
+    __shared__ Real dlA21[THREADS_PER_BLOCK];
+    __shared__ Real dlA22[THREADS_PER_BLOCK];
+    __shared__ Real dlT0[THREADS_PER_BLOCK];
+    __shared__ Real dlT1[THREADS_PER_BLOCK];
+    __shared__ Real dlT2[THREADS_PER_BLOCK];
+    Real dlA00i = 0;
+    Real dlA01i = 0;
+    Real dlA02i = 0;
+    Real dlA10i = 0;
+    Real dlA11i = 0;
+    Real dlA12i = 0;
+    Real dlA20i = 0;
+    Real dlA21i = 0;
+    Real dlA22i = 0;
+    Real dlT0i = 0;
+    Real dlT1i = 0;
+    Real dlT2i = 0;
+    const size_t cxyz = c*nx*ny*nz;
+    const size_t nncxyz = n*nc*nx*ny*nz;
+    const Real* gon = grad_out + nncxyz + cxyz;
+    Real* d_In = d_I + cxyz;
+    const Real* In = I +cxyz;
+    if (!broadcast_I) {
+        In += nncxyz;
+        d_In += nncxyz;
+    }
+    const Real* An = A + 9*n;
+    const Real* Tn = T + 3*n;
+    Real* d_An = d_A + 9*n;
+    Real* d_Tn = d_T + 3*n;
+    // center of rotation
+    Real ox = .5*static_cast<Real>(nx-1);
+    Real oy = .5*static_cast<Real>(ny-1);
+    Real oz = .5*static_cast<Real>(nz-1);
+    Real fi, fj, fk;
+    Real diff, interpval, gx, gy, gz, hx, hy, hz;
+    for (unsigned int i=ii; i < nx; i += blockDim.x) {
+        fi=static_cast<Real>(i)-ox;
+        for (unsigned int j=jj; j < ny; j += blockDim.y) {
+            fj=static_cast<Real>(j)-oy;
+            for (unsigned int k=0, ix=(i*ny+j)*nz; k < nz; ++k, ix++) {
+                fk=static_cast<Real>(k)-oz;
+
+                // apply affine transform to map i, j to lookup point
+                hx = An[0]*fi + An[1]*fj + An[2]*fk + Tn[0] + ox;
+                hy = An[3]*fi + An[4]*fj + An[5]*fk + Tn[1] + oy;
+                hz = An[6]*fi + An[7]*fj + An[8]*fk + Tn[2] + oz;
+
+                // what for L2 loss is diff now given as grad_out
+                diff = gon[ix];
+
+                // derivative with respect to input is just splat of grad_out
+                if (need_I)
+                    atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_In, NULL,
+                        diff, hx, hy, hz, nx, ny, nz);
+                // get interp value and gradient at lookup point
+                if (need_A || need_T) {
+                    triLerp_grad<Real, DEFAULT_BACKGROUND_STRATEGY>(interpval,
+                        gx, gy, gz,
+                        In,
+                        hx, hy, hz,
+                        nx, ny, nz);
+                    gx *= diff; // save a few multiplies by premultiplying
+                    gy *= diff;
+                    gz *= diff;
+                    // compute the outer product terms that will be summed
+                    if (need_A) {
+                        dlA00i += gx*fi;
+                        dlA01i += gx*fj;
+                        dlA02i += gx*fk;
+                        dlA10i += gy*fi;
+                        dlA11i += gy*fj;
+                        dlA12i += gy*fk;
+                        dlA20i += gz*fi;
+                        dlA21i += gz*fj;
+                        dlA22i += gz*fk;
+                    }
+                    if (need_T) {
+                        dlT0i += gx;
+                        dlT1i += gy;
+                        dlT2i += gz;
+                    }
+                }
+            }
+        }
+    }
+    if (need_A || need_T) {
+        if (need_A) {
+            dlA00[tid] = dlA00i;
+            dlA01[tid] = dlA01i;
+            dlA02[tid] = dlA02i;
+            dlA10[tid] = dlA10i;
+            dlA11[tid] = dlA11i;
+            dlA12[tid] = dlA12i;
+            dlA20[tid] = dlA20i;
+            dlA21[tid] = dlA21i;
+            dlA22[tid] = dlA22i;
+        }
+        if (need_T) {
+            dlT0[tid] = dlT0i;
+            dlT1[tid] = dlT1i;
+            dlT2[tid] = dlT2i;
+        }
+
+        // reduce this block
+        __syncthreads();
+        static_assert(THREADS_PER_BLOCK <= 1024, "THREADS_PER_BLOCK > 1024 not supported");
+        // ensure counterpart in second half of arrays is not outside
+        // pixel domain
+#define AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(N) \
+        if (THREADS_PER_BLOCK > N) { \
+            if (tid < N) { \
+                if (need_A) { \
+                    dlA00[tid] += dlA00[tid + N]; \
+                    dlA01[tid] += dlA01[tid + N]; \
+                    dlA02[tid] += dlA02[tid + N]; \
+                    dlA10[tid] += dlA10[tid + N]; \
+                    dlA11[tid] += dlA11[tid + N]; \
+                    dlA12[tid] += dlA12[tid + N]; \
+                    dlA20[tid] += dlA20[tid + N]; \
+                    dlA21[tid] += dlA21[tid + N]; \
+                    dlA22[tid] += dlA22[tid + N]; \
+                } \
+                if (need_T) { \
+                    dlT0[tid] += dlT0[tid + N]; \
+                    dlT1[tid] += dlT1[tid + N]; \
+                    dlT2[tid] += dlT2[tid + N]; \
+                } \
+            } \
+            __syncthreads(); \
+        }
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(512)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(256)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(128)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(64)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(32)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(16)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(8)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(4)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(2)
+        AFFINE_INTERP_BACKWARD_REDUCE_BLOCK_3D(1)
+        if (tid == 0) {
+            if (nc == 1) {
+                if (need_A) {
+                    d_An[0] = dlA00[0];
+                    d_An[1] = dlA01[0];
+                    d_An[2] = dlA02[0];
+                    d_An[3] = dlA10[0];
+                    d_An[4] = dlA11[0];
+                    d_An[5] = dlA12[0];
+                    d_An[6] = dlA20[0];
+                    d_An[7] = dlA21[0];
+                    d_An[8] = dlA22[0];
+                }
+                if (need_T) {
+                    d_Tn[0] = dlT0[0];
+                    d_Tn[1] = dlT1[0];
+                    d_Tn[2] = dlT2[0];
+                }
+            } else {
+                if (need_A) {
+                    atomicAdd(&d_An[0], dlA00[0]);
+                    atomicAdd(&d_An[1], dlA01[0]);
+                    atomicAdd(&d_An[2], dlA02[0]);
+                    atomicAdd(&d_An[3], dlA10[0]);
+                    atomicAdd(&d_An[4], dlA11[0]);
+                    atomicAdd(&d_An[5], dlA12[0]);
+                    atomicAdd(&d_An[6], dlA20[0]);
+                    atomicAdd(&d_An[7], dlA21[0]);
+                    atomicAdd(&d_An[8], dlA22[0]);
+                }
+                if (need_T) {
+                    atomicAdd(&d_Tn[0], dlT0[0]);
+                    atomicAdd(&d_Tn[1], dlT1[0]);
+                    atomicAdd(&d_Tn[2], dlT2[0]);
+                }
+            }
+        }
+    }
+}
+
 std::vector<at::Tensor> affine_interp_cuda_backward(
     at::Tensor grad_out,
     at::Tensor I,
@@ -333,6 +540,9 @@ std::vector<at::Tensor> affine_interp_cuda_backward(
     bool need_A,
     bool need_T) {
     AT_ASSERTM(I.size(1) == grad_out.size(1), "I and grad_out must have same number of channels")
+    AT_ASSERTM(A.size(0) == T.size(0), "A and T must have same first dimension")
+    auto d = I.dim() - 2;
+    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported")
 
     // avoid allocating memory for gradients we don't need to compute
 	auto d_I = need_I ? at::zeros_like(I) : at::zeros({0}, I.type());
@@ -344,27 +554,52 @@ std::vector<at::Tensor> affine_interp_cuda_backward(
 
     const bool broadcast_I = I.size(0) == 1 && grad_out.size(0) > 1;
 
-    LAGOMORPH_DISPATCH_BOOL(need_I, needI, ([&] {
-    LAGOMORPH_DISPATCH_BOOL(need_A, needA, ([&] {
-    LAGOMORPH_DISPATCH_BOOL(need_T, needT, ([&] {
-    LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
-        AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_backward", ([&] {
-        affine_interp_kernel_backward_2d<scalar_t, broadcastI, false, needI, needA, needT><<<blocks, threads>>>(
-            d_I.data<scalar_t>(),
-            d_A.data<scalar_t>(),
-            d_T.data<scalar_t>(),
-            grad_out.data<scalar_t>(),
-            I.data<scalar_t>(),
-            A.data<scalar_t>(),
-            T.data<scalar_t>(),
-            NULL,
-            NULL,
-            grad_out.size(0),
-            grad_out.size(1),
-            grad_out.size(2),
-            grad_out.size(3));
-        }));
-    })); })); })); }));
+    if (d == 2) {
+        LAGOMORPH_DISPATCH_BOOL(need_I, needI, ([&] {
+        LAGOMORPH_DISPATCH_BOOL(need_A, needA, ([&] {
+        LAGOMORPH_DISPATCH_BOOL(need_T, needT, ([&] {
+        LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
+            AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_backward", ([&] {
+            affine_interp_kernel_backward_2d<scalar_t, broadcastI, needI, needA, needT><<<blocks, threads>>>(
+                d_I.data<scalar_t>(),
+                d_A.data<scalar_t>(),
+                d_T.data<scalar_t>(),
+                grad_out.data<scalar_t>(),
+                I.data<scalar_t>(),
+                A.data<scalar_t>(),
+                T.data<scalar_t>(),
+                NULL,
+                NULL,
+                grad_out.size(0),
+                grad_out.size(1),
+                grad_out.size(2),
+                grad_out.size(3));
+            }));
+        })); })); })); }));
+    } else {
+        LAGOMORPH_DISPATCH_BOOL(need_I, needI, ([&] {
+        LAGOMORPH_DISPATCH_BOOL(need_A, needA, ([&] {
+        LAGOMORPH_DISPATCH_BOOL(need_T, needT, ([&] {
+        LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
+            AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_backward", ([&] {
+            affine_interp_kernel_backward_3d<scalar_t, broadcastI, needI, needA, needT><<<blocks, threads>>>(
+                d_I.data<scalar_t>(),
+                d_A.data<scalar_t>(),
+                d_T.data<scalar_t>(),
+                grad_out.data<scalar_t>(),
+                I.data<scalar_t>(),
+                A.data<scalar_t>(),
+                T.data<scalar_t>(),
+                NULL,
+                NULL,
+                grad_out.size(0),
+                grad_out.size(1),
+                grad_out.size(2),
+                grad_out.size(3),
+                grad_out.size(4));
+            }));
+        })); })); })); }));
+    }
 	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return {d_I, d_A, d_T};

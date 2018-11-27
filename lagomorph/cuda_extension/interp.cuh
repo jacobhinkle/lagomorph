@@ -203,6 +203,129 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
     gy = v3 - v0 + t * (v2 - v1 - v3 + v0);
 }
 
+template<typename Real, BackgroundStrategy backgroundStrategy>
+inline __device__
+void
+triLerp_grad(Real& Ix, Real& gx, Real& gy, Real& gz,
+        const Real* __restrict__ img,
+	Real x, Real y, Real z,
+	int sizeX, int sizeY, int sizeZ)
+{
+    int floorX = (int)(x);
+    int floorY = (int)(y);
+    int floorZ = (int)(z);
+
+    if (x < 0 && x != (int)(x)) --floorX;
+    if (y < 0 && y != (int)(y)) --floorY;
+    if (z < 0 && z != (int)(z)) --floorZ;
+
+    // this is not truly ceiling, but floor + 1, which is usually ceiling
+    int ceilX = floorX + 1;
+    int ceilY = floorY + 1;
+    int ceilZ = floorZ + 1;
+
+    Real t = x - floorX;
+    Real u = y - floorY;
+    Real v = z - floorZ;
+
+    Real oneMinusT = 1.f- t;
+    Real oneMinusU = 1.f- u;
+    Real oneMinusV = 1.f- v;
+
+    Real v0, v1, v2, v3, v4, v5, v6, v7;
+
+    //
+    // this is the basic trilerp function...
+    // inside indicates whether we can safely do lookups with the mapped indices
+    bool inside = map_point<backgroundStrategy>(floorX, floorY, floorZ,
+                       ceilX, ceilY, ceilZ,
+                       sizeX, sizeY, sizeZ);
+    if (inside){
+        v0 = get_pixel(floorX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
+        v1 = get_pixel(ceilX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
+        v2 = get_pixel(ceilX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
+        v3 = get_pixel(floorX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
+        v4 = get_pixel(floorX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
+        v5 = get_pixel(ceilX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
+        v6 = get_pixel(ceilX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
+        v7 = get_pixel(floorX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
+    }else {
+        bool floorXIn = floorX >= 0 && floorX < sizeX;
+        bool floorYIn = floorY >= 0 && floorY < sizeY;
+        bool floorZIn = floorZ >= 0 && floorZ < sizeZ;
+
+        bool ceilXIn = ceilX >= 0 && ceilX < sizeX;
+        bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
+        bool ceilZIn = ceilZ >= 0 && ceilZ < sizeZ;
+
+        v0 = (floorXIn && floorYIn && floorZIn) ? get_pixel(floorX, floorY, floorZ, img, sizeX, sizeY, sizeZ): 0;
+        v1 = (ceilXIn && floorYIn && floorZIn)  ? get_pixel(ceilX, floorY, floorZ, img, sizeX, sizeY, sizeZ): 0;
+        v2 = (ceilXIn && ceilYIn && floorZIn)   ? get_pixel(ceilX, ceilY, floorZ, img, sizeX, sizeY, sizeZ): 0;
+        v3 = (floorXIn && ceilYIn && floorZIn)  ? get_pixel(floorX, ceilY, floorZ, img, sizeX, sizeY, sizeZ): 0;
+        v4 = (floorXIn && floorYIn && ceilZIn) ? get_pixel(floorX, floorY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
+        v5 = (ceilXIn && floorYIn && ceilZIn)  ? get_pixel(ceilX, floorY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
+        v6 = (ceilXIn && ceilYIn && ceilZIn)   ? get_pixel(ceilX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
+        v7 = (floorXIn && ceilYIn && ceilZIn)  ? get_pixel(floorX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
+    }
+
+    // trilinear interpolation:
+    //     h =
+    //       v0 * (1 - t) * (1 - u) * (1 - v) +
+    //       v1 * t       * (1 - u) * (1 - v) +
+    //       v2 * t       * u       * (1 - v) +
+    //       v3 * (1 - t) * u       * (1 - v) +
+    //       v4 * (1 - t) * (1 - u) * v       +
+    //       v5 * t       * (1 - u) * v       +
+    //       v6 * t       * u       * v       +
+    //       v7 * (1 - t) * u       * v
+    // The derivative is 
+    //    dh/dx = (-v0) * (1 - u) * (1 - v) +
+    //              v1  * (1 - u) * (1 - v) +
+    //              v2  * u       * (1 - v) +
+    //            (-v3) * u       * (1 - v) +
+    //            (-v4) * (1 - u) * v       +
+    //              v5  * (1 - u) * v       +
+    //              v6  * u       * v       +
+    //            (-v7) * u       * v
+    //    dh/dy = (-v0) * (1 - t) * (1 - v) +
+    //            (-v1) * t       * (1 - v) +
+    //              v2  * t       * (1 - v) +
+    //              v3  * (1 - t) * (1 - v) +
+    //            (-v4) * (1 - t) * v       +
+    //            (-v5) * t       * v       +
+    //              v6  * t       * v       +
+    //              v7  * (1 - t) * v
+    //    dh/dz = (-v0) * (1 - t) * (1 - u) +
+    //            (-v1) * t       * (1 - u) +
+    //            (-v2) * t       * u       +
+    //            (-v3) * (1 - t) * u       +
+    //              v4  * (1 - t) * (1 - u) +
+    //              v5  * t       * (1 - u) +
+    //              v6  * t       * u       +
+    //              v7  * (1 - t) * u       +
+    //
+    Ix =   oneMinusV * (oneMinusU * (oneMinusT * v0  +
+                                     t         * v1) +
+                        u         * (oneMinusT * v3  +
+                                     t         * v2) ) +
+           v         * (oneMinusU * (oneMinusT * v4  +
+                                     t         * v5) +
+                        u         * (oneMinusT * v7  +
+                                     t         * v6) );
+    gx = oneMinusV * (oneMinusU * (v1 - v0)  +
+                      u         * (v2 - v3)) +
+         v         * (oneMinusU * (v5 - v4)  +
+                      u         * (v6 - v7));
+    gy = oneMinusV * (oneMinusT * (v3 - v0)  +
+                      t         * (v2 - v1)) +
+         v         * (oneMinusT * (v7 - v4)  +
+                      t         * (v6 - v5));
+    gz = oneMinusU * (oneMinusT * (v4 - v0)  +
+                      t         * (v5 - v1)) +
+         u         * (oneMinusT * (v7 - v3)  +
+                      t         * (v6 - v2));
+}
+
 
 template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
 inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
@@ -244,28 +367,23 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt, int zInt,
         int w, int h, int l) {
-	Real background = 0.0f;
+    int i=xInt, j=yInt, k=zInt;
     if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
-        wrap(xInt, w);
-        wrap(yInt, h);
-        wrap(zInt, l);
+        wrap(i, w);
+        wrap(j, h);
+        wrap(k, l);
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
-        clamp(xInt, w);
-        clamp(yInt, h);
-        clamp(zInt, l);
+        clamp(i, w);
+        clamp(j, h);
+        clamp(k, l);
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
 	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
 	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
-
-	if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
-	   backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
-	    background = 0.f;
-	}
-        if (xInt < 0 || xInt >= w) return;
-        if (yInt < 0 || yInt >= h) return;
-        if (zInt < 0 || zInt >= l) return;
+        if (i < 0 || i >= w) return;
+        if (j < 0 || j >= h) return;
+        if (k < 0 || k >= l) return;
     }else{
 	// unknown background strategy, don't allow compilation
 	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
@@ -276,7 +394,7 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
                       "Unknown background strategy");
 	return;
     }
-    int nid = (xInt * h + yInt) * l + zInt;
+    int nid = (i * h + j) * l + k;
     if (write_weights)
         atomicAdd(&d_ww[nid], ww);
     atomicAdd(&d_wd[nid], ww*mass);
