@@ -16,7 +16,7 @@ const auto INTERP_BACKWARD_NUM_THREADS =
     INTERP_BACKWARD_THREADS_X*INTERP_BACKWARD_THREADS_Y;
 
 
-template<typename Real, bool broadcast_I, bool use_contrast>
+template<typename Real, bool broadcast_I>
 __global__ void affine_interp_kernel_2d(
         Real* __restrict__ out,
         const Real* __restrict__ I,
@@ -32,8 +32,6 @@ __global__ void affine_interp_kernel_2d(
     Real* outn = out; // pointer to current vector field v
     const Real* An = A; // pointer to current vector field v
     const Real* Tn = T; // pointer to current vector field v
-    const Real* Bn = B;
-    const Real* Cn = C;
     // index of current output point (first component. add nxy for second)
     int ix = i*ny + j;
     // center of rotation
@@ -52,23 +50,16 @@ __global__ void affine_interp_kernel_2d(
             Inx = biLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
                 hx, hy,
                 nx, ny);
-            if (use_contrast) {
-                Inx = Bn[0]*Inx + Cn[0];
-            }
             outn[ix] = Inx;
             outn += nxy;
             In += nxy;
         }
         An += 4;
         Tn += 2;
-        if (use_contrast) {
-            Bn++;
-            Cn++;
-        }
     }
 }
 
-template<typename Real, bool broadcast_I, bool use_contrast>
+template<typename Real, bool broadcast_I>
 __global__ void affine_interp_kernel_3d(
         Real* __restrict__ out,
         const Real* __restrict__ I,
@@ -84,8 +75,6 @@ __global__ void affine_interp_kernel_3d(
     Real* outn = out; // pointer to current vector field v
     const Real* An = A; // pointer to current vector field v
     const Real* Tn = T; // pointer to current vector field v
-    const Real* Bn = B;
-    const Real* Cn = C;
     // index of current output point (first component. add nxy for second)
     int ix = (i*ny + j)*nz;
     // center of rotation
@@ -99,31 +88,22 @@ __global__ void affine_interp_kernel_3d(
     for (int n=0; n < nn; ++n) {
         if (broadcast_I) In = I;
         else In = I + n*nc*nxyz;
-        outn = out + n*nc*nxyz;
-        for (int k=0; k < nz; ++k) {
-            // apply affine transform to map i, j to lookup point
-            Real fk=static_cast<Real>(k)-oz;
-            hx = An[0]*fi + An[1]*fj + An[2]*fk + Tn[0] + ox;
-            hy = An[3]*fi + An[4]*fj + An[5]*fk + Tn[1] + oy;
-            hz = An[6]*fi + An[7]*fj + An[8]*fk + Tn[2] + oz;
-            for (int c=0; c < nc; ++c) {
+        for (int c=0; c < nc; ++c) {
+            for (int k=0; k < nz; ++k) {
+                Real fk=static_cast<Real>(k)-oz;
+                hx = An[0]*fi + An[1]*fj + An[2]*fk + Tn[0] + ox;
+                hy = An[3]*fi + An[4]*fj + An[5]*fk + Tn[1] + oy;
+                hz = An[6]*fi + An[7]*fj + An[8]*fk + Tn[2] + oz;
                 Inx = triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
                     hx, hy, hz,
                     nx, ny, nz);
-                if (use_contrast) {
-                    Inx = Bn[0]*Inx + Cn[0];
-                }
                 outn[ix + k] = Inx;
-                In += nxyz;
-                outn += nxyz;
             }
+            In += nxyz;
+            outn += nxyz;
         }
         An += 9;
         Tn += 3;
-        if (use_contrast) {
-            Bn++;
-            Cn++;
-        }
     }
 }
 
@@ -147,7 +127,7 @@ at::Tensor affine_interp_cuda_forward(
         Itx = at::zeros({A.size(0), I.size(1), I.size(2), I.size(3)}, I.type());
         LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
             AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_forward", ([&] {
-            affine_interp_kernel_2d<scalar_t, broadcastI, false><<<blocks, threads>>>(
+            affine_interp_kernel_2d<scalar_t, broadcastI><<<blocks, threads>>>(
                 Itx.data<scalar_t>(),
                 I.data<scalar_t>(),
                 A.data<scalar_t>(),
@@ -164,7 +144,7 @@ at::Tensor affine_interp_cuda_forward(
         Itx = at::zeros({A.size(0), I.size(1), I.size(2), I.size(3), I.size(4)}, I.type());
         LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
             AT_DISPATCH_FLOATING_TYPES(I.type(), "affine_interp_cuda_forward", ([&] {
-            affine_interp_kernel_3d<scalar_t, broadcastI, false><<<blocks, threads>>>(
+            affine_interp_kernel_3d<scalar_t, broadcastI><<<blocks, threads>>>(
                 Itx.data<scalar_t>(),
                 I.data<scalar_t>(),
                 A.data<scalar_t>(),
@@ -184,7 +164,7 @@ at::Tensor affine_interp_cuda_forward(
     return Itx;
 }
 
-template<typename Real, bool broadcast_I, bool use_contrast,
+template<typename Real, bool broadcast_I,
     bool need_I, bool need_A, bool need_T>
 __global__ void affine_interp_kernel_backward_2d(
         Real* __restrict__ d_I,
@@ -228,8 +208,6 @@ __global__ void affine_interp_kernel_backward_2d(
     }
     const Real* An = A + 4*n;
     const Real* Tn = T + 2*n;
-    const Real* Bn = B + n;
-    const Real* Cn = C + n;
     Real* d_An = d_A + 4*n;
     Real* d_Tn = d_T + 2*n;
     // center of rotation
@@ -259,11 +237,6 @@ __global__ void affine_interp_kernel_backward_2d(
                     In,
                     hx, hy,
                     nx, ny);
-                if (use_contrast) {
-                    diff = Bn[0]*diff + Cn[0];
-                    gx *= Bn[0];
-                    gy *= Bn[0];
-                }
                 gx *= diff; // save a few multiplies by premultiplying
                 gy *= diff;
                 // compute the outer product terms that will be summed
