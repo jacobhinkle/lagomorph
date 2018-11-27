@@ -178,3 +178,34 @@ inline __device__ bool map_point(int& floorX, int& floorY,
                           sizeX, sizeY);
     }
 }
+
+template<BackgroundStrategy backgroundStrategy>
+inline __device__ bool map_point(int& floorX, int& floorY, int& floorZ,
+               int& ceilX, int& ceilY, int& ceilZ,
+               size_t  sizeX, size_t  sizeY, size_t  sizeZ) {
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrapBackground(floorX, floorY, floorZ,
+                       ceilX, ceilY, ceilZ,
+                       sizeX, sizeY, sizeZ);
+        return true;
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clampBackground(floorX, floorY, floorZ,
+                        ceilX, ceilY, ceilZ,
+                        sizeX, sizeY, sizeZ);
+        return true;
+    }
+    else {
+        return isInside(floorX, floorY, floorZ,
+                          ceilX, ceilY, ceilZ,
+                          sizeX, sizeY, sizeZ);
+    }
+}
