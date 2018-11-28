@@ -93,8 +93,7 @@ fluid_kernel_2d(Real* __restrict__ Fm,
         const Real* __restrict__ cosX, const Real* __restrict__ sinX,
         const Real* __restrict__ cosY, const Real* __restrict__ sinY,
         double alpha, double beta, double gamma,
-        size_t nn, size_t nx, size_t ny,
-        size_t cutoffX, size_t cutoffY) {
+        size_t nn, size_t nx, size_t ny) {
     const size_t i = blockDim.x * blockIdx.x + threadIdx.x;
     const size_t j = blockDim.y * blockIdx.y + threadIdx.y;
     if (i >= nx || j >= ny) return;
@@ -184,10 +183,9 @@ void fluid_operator_cuda(
     std::vector<at::Tensor> sinluts,
     double alpha,
     double beta,
-    double gamma,
-    const int cutoffX,
-    const int cutoffY) {
+    double gamma) {
     auto dim = Fmv.dim() - 3;
+    AT_ASSERTM(dim == 2 || dim == 3, "Only two- and three-dimensional fluid metric is supported")
     AT_ASSERTM(Fmv.size(1) == dim, "Vector field has incorrect shape for dimension")
     AT_ASSERTM(Fmv.type() == cosluts[0].type(), "Type of LUTs must equal that of image")
 
@@ -196,33 +194,33 @@ void fluid_operator_cuda(
                     (Fmv.size(3) + threads.y - 1) / threads.y);
 
     if (dim == 2) {
-        if (inverse) {
+        LAGOMORPH_DISPATCH_BOOL(inverse, do_inverse, ([&] {
             AT_DISPATCH_FLOATING_TYPES(Fmv.type(), "fluid_operator_cuda", ([&] {
-                fluid_kernel_2d<scalar_t, true><<<blocks, threads>>>(
+                fluid_kernel_2d<scalar_t, do_inverse><<<blocks, threads>>>(
                     Fmv.data<scalar_t>(),
                     cosluts[0].data<scalar_t>(),
                     sinluts[0].data<scalar_t>(),
                     cosluts[1].data<scalar_t>(),
                     sinluts[1].data<scalar_t>(),
                     alpha, beta, gamma,
-                    Fmv.size(0), Fmv.size(2), Fmv.size(3),
-                    cutoffX, cutoffY);
+                    Fmv.size(0), Fmv.size(2), Fmv.size(3));
                 }));
-        } else {
-            AT_DISPATCH_FLOATING_TYPES(Fmv.type(), "fluid_operator_cuda", ([&] {
-                fluid_kernel_2d<scalar_t, false><<<blocks, threads>>>(
-                    Fmv.data<scalar_t>(),
-                    cosluts[0].data<scalar_t>(),
-                    sinluts[0].data<scalar_t>(),
-                    cosluts[1].data<scalar_t>(),
-                    sinluts[1].data<scalar_t>(),
-                    alpha, beta, gamma,
-                    Fmv.size(0), Fmv.size(2), Fmv.size(3),
-                    cutoffX, cutoffY);
-                }));
-        }
+            }));
     } else if (dim == 3) {
-    } else {
+        LAGOMORPH_DISPATCH_BOOL(inverse, do_inverse, ([&] {
+            AT_DISPATCH_FLOATING_TYPES(Fmv.type(), "fluid_operator_cuda", ([&] {
+                fluid_kernel_3d<scalar_t, do_inverse><<<blocks, threads>>>(
+                    Fmv.data<scalar_t>(),
+                    cosluts[0].data<scalar_t>(),
+                    sinluts[0].data<scalar_t>(),
+                    cosluts[1].data<scalar_t>(),
+                    sinluts[1].data<scalar_t>(),
+                    cosluts[2].data<scalar_t>(),
+                    sinluts[2].data<scalar_t>(),
+                    alpha, beta, gamma,
+                    Fmv.size(0), Fmv.size(2), Fmv.size(3), Fmv.size(4));
+                }));
+            }));
     }
     LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 }

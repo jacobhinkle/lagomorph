@@ -66,9 +66,7 @@ void fluid_operator_cuda(
     std::vector<at::Tensor> sinlut,
     double alpha,
     double beta,
-    double gamma,
-    const int cutoffX,
-    const int cutoffY);
+    double gamma);
 
 
 void set_debug_mode(bool mode) {
@@ -130,16 +128,14 @@ void fluid_operator(
     const std::vector<at::Tensor> sinluts,
     const double alpha,
     const double beta,
-    const double gamma,
-    const int cutoffX,
-    const int cutoffY) {
+    const double gamma) {
     CHECK_INPUT(Fmv);
     size_t dim = Fmv.dim() - 3; // note that pytorch fft adds a dimension (size 2)
     AT_ASSERTM(cosluts.size() == dim, "Must provide same number cosine LUTs ("
             + std::to_string(cosluts.size()) + ") as spatial dimension '" + std::to_string(dim) + "'")
     AT_ASSERTM(sinluts.size() == dim, "Must provide same number sine LUTs ("
             + std::to_string(sinluts.size()) + ") as spatial dimension '" + std::to_string(dim) + "'")
-    return fluid_operator_cuda(Fmv, inverse, cosluts, sinluts, alpha, beta, gamma, cutoffX, cutoffY);
+    return fluid_operator_cuda(Fmv, inverse, cosluts, sinluts, alpha, beta, gamma);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
