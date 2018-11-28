@@ -12,15 +12,39 @@ from testing.utils import catch_gradcheck
 
 np.random.seed(1)
 
-res = 2 # which resolutions to test
-dims = [2] # which dimensions to test
+res = 3 # which resolutions to test
+dims = [2,3] # which dimensions to test
 batch_sizes = [1,2] # which batch sizes to test
 
-def test_sharp_gradcheck():
+def test_fluid_sharp_gradcheck():
     fluid_params = [.1,.01,.001]
     for bs in batch_sizes:
         for dim in dims:
             defsh = tuple([bs,dim]+[res]*dim)
             m = torch.randn(defsh, dtype=torch.float64, requires_grad=True).cuda()
             metric = lm.FluidMetric(fluid_params)
-            catch_gradcheck(f"Failed sharp gradcheck with batch size {bs} dim {dim}", metric.sharp, (m,))
+            catch_gradcheck(f"Failed fluid sharp gradcheck with batch size {bs} dim {dim}", metric.sharp, (m,), 1e-4)
+
+def test_fluid_flat_gradcheck():
+    fluid_params = [.1,.01,.001]
+    for bs in batch_sizes:
+        for dim in dims:
+            defsh = tuple([bs,dim]+[res]*dim)
+            v = torch.randn(defsh, dtype=torch.float64, requires_grad=True).cuda()
+            metric = lm.FluidMetric(fluid_params)
+            catch_gradcheck(f"Failed fluid flat gradcheck with batch size {bs} dim {dim}", metric.flat, (v,))
+
+def test_fluid_inverse():
+    fluid_params = [.1,.01,.001]
+    for bs in batch_sizes:
+        for dim in dims:
+            defsh = tuple([bs,dim]+[res]*dim)
+            m = torch.randn(defsh, dtype=torch.float64, requires_grad=False).cuda()
+            metric = lm.FluidMetric(fluid_params)
+            v = metric.sharp(m)
+            vm = metric.flat(v)
+            print(vm)
+            print(m)
+            print(vm-m)
+            print(torch.isclose(vm, m))
+            assert torch.allclose(vm, m, atol=1e-3), f"Failed fluid inverse check with batch size {bs} dim {dim}"
