@@ -19,13 +19,14 @@ res = 3 # which resolution to test
 dims = [2,3] # which dimensions to test
 channels = [1,2,4] # numbers of channels to test
 batch_sizes = [1,2] # which batch sizes to test
+TF = [True,False]
 
 @pytest.mark.parametrize("bs", batch_sizes)
 @pytest.mark.parametrize("dim", dims)
 @pytest.mark.parametrize("c", channels)
 def test_affine_interp_identity(bs, dim, c):
     imsh = tuple([bs,c]+[res]*dim)
-    I = torch.randn(imsh, dtype=torch.float64, requires_grad=True).cuda()
+    I = torch.randn(imsh, dtype=torch.float64, requires_grad=False).cuda()
     A = torch.zeros((bs,dim,dim), dtype=I.dtype, requires_grad=False).to(I.device)
     T = torch.zeros((bs,dim), dtype=I.dtype, requires_grad=False).to(I.device)
     for i in range(dim):
@@ -37,44 +38,15 @@ def test_affine_interp_identity(bs, dim, c):
 @pytest.mark.parametrize("bs", batch_sizes)
 @pytest.mark.parametrize("dim", dims)
 @pytest.mark.parametrize("c", channels)
-def test_affine_interp_gradcheck_I(bs, dim, c):
+@pytest.mark.parametrize("testI", TF)
+@pytest.mark.parametrize("testA", TF)
+@pytest.mark.parametrize("testT", TF)
+def test_affine_interp_gradcheck_I(bs, dim, c, testI, testA, testT):
+    if not (testI or testA or testT): return # nothing to test
     imsh = tuple([bs,c]+[res]*dim)
-    I = torch.randn(imsh, dtype=torch.float64, requires_grad=True).cuda()
-    A = torch.randn((bs,dim,dim), dtype=I.dtype, requires_grad=False).to(I.device)
-    T = torch.randn((bs,dim), dtype=I.dtype, requires_grad=False).to(I.device)
-    foo = lambda Ix: lm.affine_interp(Ix, A, T)
-    catch_gradcheck(f"Failed affine interp gradcheck with batch size {bs} dim {dim} channels {c}", foo, (I,))
-
-@pytest.mark.parametrize("bs", batch_sizes)
-@pytest.mark.parametrize("dim", dims)
-@pytest.mark.parametrize("c", channels)
-def test_affine_interp_gradcheck_A(bs, dim, c):
-    imsh = tuple([bs,c]+[res]*dim)
-    I = torch.randn(imsh, dtype=torch.float64, requires_grad=False).cuda()
-    A = torch.randn((bs,dim,dim), dtype=I.dtype, requires_grad=True).to(I.device)
-    T = torch.randn((bs,dim), dtype=I.dtype, requires_grad=False).to(I.device)
-    foo = lambda Ax: lm.affine_interp(I, Ax, T)
-    catch_gradcheck(f"Failed affine interp gradcheck with batch size {bs} dim {dim} channels {c}", foo, (A,))
-
-@pytest.mark.parametrize("bs", batch_sizes)
-@pytest.mark.parametrize("dim", dims)
-@pytest.mark.parametrize("c", channels)
-def test_affine_interp_gradcheck_T(bs, dim, c):
-    imsh = tuple([bs,c]+[res]*dim)
-    I = torch.randn(imsh, dtype=torch.float64, requires_grad=False).cuda()
-    A = torch.randn((bs,dim,dim), dtype=I.dtype, requires_grad=False).to(I.device)
-    T = torch.randn((bs,dim), dtype=I.dtype, requires_grad=True).to(I.device)
-    foo = lambda Tx: lm.affine_interp(I, A, Tx)
-    catch_gradcheck(f"Failed affine interp gradcheck with batch size {bs} dim {dim} channels {c}", foo, (T,))
-
-@pytest.mark.parametrize("bs", batch_sizes)
-@pytest.mark.parametrize("dim", dims)
-@pytest.mark.parametrize("c", channels)
-def test_affine_interp_gradcheck_all(bs, dim, c):
-    imsh = tuple([bs,c]+[res]*dim)
-    I = torch.randn(imsh, dtype=torch.float64, requires_grad=True).cuda()
-    A = torch.randn((bs,dim,dim), dtype=I.dtype, requires_grad=True).to(I.device)
-    T = torch.randn((bs,dim), dtype=I.dtype, requires_grad=True).to(I.device)
+    I = torch.randn(imsh, dtype=torch.float64, requires_grad=testI).cuda()
+    A = torch.randn((bs,dim,dim), dtype=I.dtype, requires_grad=testA).to(I.device)
+    T = torch.randn((bs,dim), dtype=I.dtype, requires_grad=testT).to(I.device)
     catch_gradcheck(f"Failed affine interp gradcheck with batch size {bs} dim {dim} channels {c}", lm.affine_interp, (I,A,T))
 
 @pytest.mark.parametrize("bs", batch_sizes)
