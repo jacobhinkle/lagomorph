@@ -33,10 +33,10 @@ inline __device__ Real biLerp(const Real* __restrict__ img,
                     ceilX, ceilY,
                     sizeX, sizeY);
 
-    v0 = get_pixel(floorX, floorY, img, sizeX, sizeY);
-    v1 = get_pixel(ceilX, floorY, img, sizeX, sizeY);
-    v2 = get_pixel(ceilX, ceilY, img, sizeX, sizeY);
-    v3 = get_pixel(floorX, ceilY, img, sizeX, sizeY);
+    v0 = get_value(img, sizeX, sizeY, floorX, floorY);
+    v1 = get_value(img, sizeX, sizeY, ceilX, floorY);
+    v2 = get_value(img, sizeX, sizeY, ceilX, ceilY);
+    v3 = get_value(img, sizeX, sizeY, floorX, ceilY);
 
     //
     // this is the basic bilerp function...
@@ -88,14 +88,14 @@ inline __device__ Real triLerp(const Real* __restrict__ img,
                     ceilX, ceilY, ceilZ,
                     sizeX, sizeY, sizeZ);
 
-    v0 = get_pixel(floorX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
-    v1 = get_pixel(ceilX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
-    v2 = get_pixel(ceilX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
-    v3 = get_pixel(floorX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
-    v4 = get_pixel(floorX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
-    v5 = get_pixel(ceilX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
-    v6 = get_pixel(ceilX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
-    v7 = get_pixel(floorX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
+    v0 = get_value(img, sizeX, sizeY, sizeZ, floorX, floorY, floorZ);
+    v1 = get_value(img, sizeX, sizeY, sizeZ, ceilX, floorY, floorZ);
+    v2 = get_value(img, sizeX, sizeY, sizeZ, ceilX, ceilY, floorZ);
+    v3 = get_value(img, sizeX, sizeY, sizeZ, floorX, ceilY, floorZ);
+    v4 = get_value(img, sizeX, sizeY, sizeZ, floorX, floorY, ceilZ);
+    v5 = get_value(img, sizeX, sizeY, sizeZ, ceilX, floorY, ceilZ);
+    v6 = get_value(img, sizeX, sizeY, sizeZ, ceilX, ceilY, ceilZ);
+    v7 = get_value(img, sizeX, sizeY, sizeZ, floorX, ceilY, ceilZ);
 
     //
     // this is the basic trilerp function...
@@ -155,10 +155,10 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
                        ceilX, ceilY,
                        sizeX, sizeY);
     if (inside){
-        v0 = get_pixel(floorX, floorY, img, sizeX, sizeY);
-        v1 = get_pixel(ceilX, floorY, img, sizeX, sizeY);
-        v2 = get_pixel(ceilX, ceilY, img, sizeX, sizeY);
-        v3 = get_pixel(floorX, ceilY, img, sizeX, sizeY);
+        v0 = get_value(img, sizeX, sizeY, floorX, floorY);
+        v1 = get_value(img, sizeX, sizeY, ceilX, floorY);
+        v2 = get_value(img, sizeX, sizeY, ceilX, ceilY);
+        v3 = get_value(img, sizeX, sizeY, floorX, ceilY);
     }else {
         bool floorXIn = floorX >= 0 && floorX < sizeX;
         bool floorYIn = floorY >= 0 && floorY < sizeY;
@@ -166,10 +166,10 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
         bool ceilXIn = ceilX >= 0 && ceilX < sizeX;
         bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
 
-        v0 = (floorXIn && floorYIn) ? get_pixel(floorX, floorY, img, sizeX, sizeY): 0;
-        v1 = (ceilXIn && floorYIn)  ? get_pixel(ceilX, floorY, img, sizeX, sizeY): 0;
-        v2 = (ceilXIn && ceilYIn)   ? get_pixel(ceilX, ceilY, img, sizeX, sizeY): 0;
-        v3 = (floorXIn && ceilYIn)  ? get_pixel(floorX, ceilY, img, sizeX, sizeY): 0;
+        v0 = (floorXIn && floorYIn) ? get_value(img, sizeX, sizeY, floorX, floorY): 0;
+        v1 = (ceilXIn && floorYIn)  ? get_value(img, sizeX, sizeY, ceilX, floorY): 0;
+        v2 = (ceilXIn && ceilYIn)   ? get_value(img, sizeX, sizeY, ceilX, ceilY): 0;
+        v3 = (floorXIn && ceilYIn)  ? get_value(img, sizeX, sizeY, floorX, ceilY): 0;
     }
 
     //
@@ -241,14 +241,14 @@ triLerp_grad(Real& Ix, Real& gx, Real& gy, Real& gz,
                        ceilX, ceilY, ceilZ,
                        sizeX, sizeY, sizeZ);
     if (inside){
-        v0 = get_pixel(floorX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
-        v1 = get_pixel(ceilX, floorY, floorZ, img, sizeX, sizeY, sizeZ);
-        v2 = get_pixel(ceilX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
-        v3 = get_pixel(floorX, ceilY, floorZ, img, sizeX, sizeY, sizeZ);
-        v4 = get_pixel(floorX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
-        v5 = get_pixel(ceilX, floorY, ceilZ, img, sizeX, sizeY, sizeZ);
-        v6 = get_pixel(ceilX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
-        v7 = get_pixel(floorX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ);
+        v0 = get_value(img, sizeX, sizeY, sizeZ, floorX, floorY, floorZ);
+        v1 = get_value(img, sizeX, sizeY, sizeZ, ceilX, floorY, floorZ);
+        v2 = get_value(img, sizeX, sizeY, sizeZ, ceilX, ceilY, floorZ);
+        v3 = get_value(img, sizeX, sizeY, sizeZ, floorX, ceilY, floorZ);
+        v4 = get_value(img, sizeX, sizeY, sizeZ, floorX, floorY, ceilZ);
+        v5 = get_value(img, sizeX, sizeY, sizeZ, ceilX, floorY, ceilZ);
+        v6 = get_value(img, sizeX, sizeY, sizeZ, ceilX, ceilY, ceilZ);
+        v7 = get_value(img, sizeX, sizeY, sizeZ, floorX, ceilY, ceilZ);
     }else {
         bool floorXIn = floorX >= 0 && floorX < sizeX;
         bool floorYIn = floorY >= 0 && floorY < sizeY;
@@ -258,14 +258,14 @@ triLerp_grad(Real& Ix, Real& gx, Real& gy, Real& gz,
         bool ceilYIn = ceilY >= 0 && ceilY < sizeY;
         bool ceilZIn = ceilZ >= 0 && ceilZ < sizeZ;
 
-        v0 = (floorXIn && floorYIn && floorZIn) ? get_pixel(floorX, floorY, floorZ, img, sizeX, sizeY, sizeZ): 0;
-        v1 = (ceilXIn && floorYIn && floorZIn)  ? get_pixel(ceilX, floorY, floorZ, img, sizeX, sizeY, sizeZ): 0;
-        v2 = (ceilXIn && ceilYIn && floorZIn)   ? get_pixel(ceilX, ceilY, floorZ, img, sizeX, sizeY, sizeZ): 0;
-        v3 = (floorXIn && ceilYIn && floorZIn)  ? get_pixel(floorX, ceilY, floorZ, img, sizeX, sizeY, sizeZ): 0;
-        v4 = (floorXIn && floorYIn && ceilZIn) ? get_pixel(floorX, floorY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
-        v5 = (ceilXIn && floorYIn && ceilZIn)  ? get_pixel(ceilX, floorY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
-        v6 = (ceilXIn && ceilYIn && ceilZIn)   ? get_pixel(ceilX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
-        v7 = (floorXIn && ceilYIn && ceilZIn)  ? get_pixel(floorX, ceilY, ceilZ, img, sizeX, sizeY, sizeZ): 0;
+        v0 = (floorXIn && floorYIn && floorZIn) ? get_value(img, sizeX, sizeY, sizeZ, floorX, floorY, floorZ): 0;
+        v1 = (ceilXIn && floorYIn && floorZIn)  ? get_value(img, sizeX, sizeY, sizeZ, ceilX, floorY, floorZ): 0;
+        v2 = (ceilXIn && ceilYIn && floorZIn)   ? get_value(img, sizeX, sizeY, sizeZ, ceilX, ceilY, floorZ): 0;
+        v3 = (floorXIn && ceilYIn && floorZIn)  ? get_value(img, sizeX, sizeY, sizeZ, floorX, ceilY, floorZ): 0;
+        v4 = (floorXIn && floorYIn && ceilZIn) ? get_value(img, sizeX, sizeY, sizeZ, floorX, floorY, ceilZ): 0;
+        v5 = (ceilXIn && floorYIn && ceilZIn)  ? get_value(img, sizeX, sizeY, sizeZ, ceilX, floorY, ceilZ): 0;
+        v6 = (ceilXIn && ceilYIn && ceilZIn)   ? get_value(img, sizeX, sizeY, sizeZ, ceilX, ceilY, ceilZ): 0;
+        v7 = (floorXIn && ceilYIn && ceilZIn)  ? get_value(img, sizeX, sizeY, sizeZ, floorX, ceilY, ceilZ): 0;
     }
 
     // trilinear interpolation:

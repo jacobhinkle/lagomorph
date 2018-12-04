@@ -60,39 +60,125 @@ jacobian_times_vectorfield_forward_kernel_2d(Real* __restrict__ out, const Real*
     }
 }
 
+template<typename Real, bool displacement, bool transpose, BackgroundStrategy backgroundStrategy>
+__global__
+void
+jacobian_times_vectorfield_forward_kernel_3d(Real* __restrict__ out, const Real* __restrict__ v, const Real* __restrict__ w,
+        int nn, int nc, int nx, int ny, int nz) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= nx || j >= ny) return;
+    Real gx, gy, gz; // gradient of component of v
+    const int nxy = nx*ny;
+    Real* outn = out;
+    const Real* vn = v; // pointer to current vector field v
+    const Real* wn = w;
+    int ix = i*ny + j; // indices of first and second component of wn
+    int iy = ix + nxy;
+    int iz = iy + nxy;
+    for (int n=0; n < nn; ++n) {
+        if (transpose) {
+            for (int k=0; k < nz; ++k) {
+                vn = v + 3*n*nxy;
+                grad_point<Real, backgroundStrategy>(gx, gy, gz, vn, nx, ny, nz, i, j, k);
+                if (displacement) gx += 1.0;
+                outn[ix*nz + k] = gx*wn[ix*nz + k];
+                outn[iy*nz + k] = gy*wn[ix*nz + k];
+                outn[iz*nz + k] = gz*wn[ix*nz + k];
+                vn += nxy;
+                grad_point<Real, backgroundStrategy>(gx, gy, gz, vn, nx, ny, nz, i, j, k);
+                if (displacement) gy += 1.0;
+                outn[ix*nz + k] += gx*wn[iy*nz + k];
+                outn[iy*nz + k] += gy*wn[iy*nz + k];
+                outn[iz*nz + k] += gz*wn[iy*nz + k];
+                vn += nxy;
+                grad_point<Real, backgroundStrategy>(gx, gy, gz, vn, nx, ny, nz, i, j, k);
+                if (displacement) gz += 1.0;
+                outn[ix*nz + k] += gx*wn[iz*nz + k];
+                outn[iy*nz + k] += gy*wn[iz*nz + k];
+                outn[iz*nz + k] += gz*wn[iz*nz + k];
+            }
+            outn += 3*nxy;
+        } else {
+            for (int c=0; c < nc; ++c) {
+                for (int k=0; k < nz; ++k) {
+                    // get gradient of each component of vn
+                    grad_point<Real, backgroundStrategy>(gx, gy, gz,
+                        vn,
+                        nx, ny, nz,
+                        i, j, k);
+                    if (displacement) {
+                        if (c == 0) gx += 1.0;
+                        if (c == 1) gy += 1.0;
+                        if (c == 2) gz += 1.0;
+                    }
+                    outn[ix*nz+k] = gx*wn[(ix      )*nz+k] + \
+                                    gy*wn[(ix+  nxy)*nz+k] + \
+                                    gz*wn[(ix+2*nxy)*nz+k];
+                }
+                vn += nxy; // move to next component
+                outn += nxy;
+            }
+        }
+        // increment w lookups
+        wn += 3*nxy;
+    }
+}
+
 at::Tensor jacobian_times_vectorfield_forward(
     at::Tensor g,
     at::Tensor v,
     bool displacement,
 	bool transpose) {
-    const dim3 threads(32, 32);
+    auto d = g.dim() - 2;
+    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
+    const dim3 threads(16, 32);
     const dim3 blocks((g.size(2) + threads.x - 1) / threads.x,
                     (g.size(3) + threads.y - 1) / threads.y);
 
-    const auto dim = g.dim()-2;
-    AT_ASSERTM(v.size(1) == dim, "vector field is of wrong dimension")
-    AT_ASSERTM(!displacement || g.size(1) == dim, "Displacement mode only defined for vector fields")
+    AT_ASSERTM(v.size(1) == d, "vector field is of wrong dimension")
+    AT_ASSERTM(!displacement || g.size(1) == d, "Displacement mode only defined for vector fields")
     if (transpose)
-        AT_ASSERTM(g.size(1) == dim, "Jacobian transpose only implemented for vector fields")
+        AT_ASSERTM(g.size(1) == d, "Jacobian transpose only implemented for vector fields")
 
     const auto batch_size = (v.size(0) > g.size(0)) ? v.size(0) : g.size(0);
 
-    auto out = at::zeros({batch_size, g.size(1), g.size(2), g.size(3)}, g.type());
+    at::Tensor out;
 
-    LAGOMORPH_DISPATCH_BOOL(transpose, trans, ([&] {
-        LAGOMORPH_DISPATCH_BOOL(displacement, disp, ([&] {
-            AT_DISPATCH_FLOATING_TYPES(g.type(), "jacobian_times_vectorfield_forward", ([&] {
-            jacobian_times_vectorfield_forward_kernel_2d<scalar_t, disp, trans, DEFAULT_BACKGROUND_STRATEGY><<<blocks, threads>>>(
-                out.data<scalar_t>(),
-                g.data<scalar_t>(),
-                v.data<scalar_t>(),
-                out.size(0),
-                out.size(1),
-                out.size(2),
-                out.size(3));
+    if (d == 2) {
+        out = at::zeros({batch_size, g.size(1), g.size(2), g.size(3)}, g.type());
+        LAGOMORPH_DISPATCH_BOOL(transpose, trans, ([&] {
+            LAGOMORPH_DISPATCH_BOOL(displacement, disp, ([&] {
+                AT_DISPATCH_FLOATING_TYPES(g.type(), "jacobian_times_vectorfield_forward", ([&] {
+                jacobian_times_vectorfield_forward_kernel_2d<scalar_t, disp, trans, DEFAULT_BACKGROUND_STRATEGY><<<blocks, threads>>>(
+                    out.data<scalar_t>(),
+                    g.data<scalar_t>(),
+                    v.data<scalar_t>(),
+                    out.size(0),
+                    out.size(1),
+                    out.size(2),
+                    out.size(3));
+                }));
             }));
         }));
-    }));
+    } else {
+        out = at::zeros({batch_size, g.size(1), g.size(2), g.size(3), g.size(4)}, g.type());
+        LAGOMORPH_DISPATCH_BOOL(transpose, trans, ([&] {
+            LAGOMORPH_DISPATCH_BOOL(displacement, disp, ([&] {
+                AT_DISPATCH_FLOATING_TYPES(g.type(), "jacobian_times_vectorfield_forward", ([&] {
+                jacobian_times_vectorfield_forward_kernel_3d<scalar_t, disp, trans, DEFAULT_BACKGROUND_STRATEGY><<<blocks, threads>>>(
+                    out.data<scalar_t>(),
+                    g.data<scalar_t>(),
+                    v.data<scalar_t>(),
+                    out.size(0),
+                    out.size(1),
+                    out.size(2),
+                    out.size(3),
+                    out.size(4));
+                }));
+            }));
+        }));
+    }
 	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return out;

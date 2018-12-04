@@ -32,17 +32,47 @@ __global__ void interp_kernel_2d(
     Real fi=static_cast<Real>(i);
     Real fj=static_cast<Real>(j);
     for (int n=0; n < nn; ++n) {
-        if (broadcast_I) In = I; // reset to first channel
+        if (broadcast_I) In = I;
         auto hx = fi + dt*un[ix];
         auto hy = fj + dt*un[iy];
         for (int c=0; c < nc; ++c) {
             outn[ix] = biLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
                 hx, hy, nx, ny);
-            // move to next channel/image
             In += nxy;
             outn += nxy;
         }
         un += 2*nxy;
+    }
+}
+template<typename Real, bool broadcast_I>
+__global__ void interp_kernel_3d(
+        Real* __restrict__ out,
+        const Real* __restrict__ I,
+        const Real* __restrict__ u,
+        double dt,
+        size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= nx || j >= ny) return;
+    const int nxyz = nx*ny*nz;
+    const Real* In = I;
+    Real fi=static_cast<Real>(i);
+    Real fj=static_cast<Real>(j);
+    for (int n=0; n < nn; ++n) {
+        if (broadcast_I) In = I;
+        for (int c=0; c < nc; ++c) {
+            for (int k=0; k < nz; ++k) {
+                Real fk=static_cast<Real>(k);
+                auto ix = (((n*3)*nx + i)*ny + j)*nz + k;
+                auto hx = fi + dt*u[ix];
+                auto hy = fj + dt*u[ix+nxyz];
+                auto hz = fk + dt*u[ix+2*nxyz];
+                out[(((n*nc+c)*nx + i)*ny + j)*nz + k] = \
+                    triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
+                        hx, hy, hz, nx, ny, nz);
+            }
+            In += nxyz;
+        }
     }
 }
 
@@ -50,6 +80,8 @@ at::Tensor interp_cuda_forward(
     at::Tensor Iv,
     at::Tensor u,
     double dt) {
+    auto d = Iv.dim() - 2;
+    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional interpolation is supported")
     const dim3 threads(32, 32);
     const dim3 blocks((Iv.size(2) + threads.x - 1) / threads.x,
                     (Iv.size(3) + threads.y - 1) / threads.y);
@@ -58,21 +90,39 @@ at::Tensor interp_cuda_forward(
 
     const bool broadcast_I = Iv.size(0) < batch_size;
 
-    auto out = at::zeros({batch_size, Iv.size(1), Iv.size(2), Iv.size(3)}, Iv.type());
-
-    LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
-        AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_forward", ([&] {
-        interp_kernel_2d<scalar_t, broadcastI><<<blocks, threads>>>(
-            out.data<scalar_t>(),
-            Iv.data<scalar_t>(),
-            u.data<scalar_t>(),
-            dt,
-            batch_size,
-            Iv.size(1),
-            Iv.size(2),
-            Iv.size(3));
+    at::Tensor out;
+    if (d == 2) {
+        out = at::zeros({batch_size, Iv.size(1), Iv.size(2), Iv.size(3)}, Iv.type());
+        LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
+            AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_forward", ([&] {
+            interp_kernel_2d<scalar_t, broadcastI><<<blocks, threads>>>(
+                out.data<scalar_t>(),
+                Iv.data<scalar_t>(),
+                u.data<scalar_t>(),
+                dt,
+                batch_size,
+                Iv.size(1),
+                Iv.size(2),
+                Iv.size(3));
+            }));
         }));
-    }));
+    } else {
+        out = at::zeros({batch_size, Iv.size(1), Iv.size(2), Iv.size(3), Iv.size(4)}, Iv.type());
+        LAGOMORPH_DISPATCH_BOOL(broadcast_I, broadcastI, ([&] {
+            AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_forward", ([&] {
+            interp_kernel_3d<scalar_t, broadcastI><<<blocks, threads>>>(
+                out.data<scalar_t>(),
+                Iv.data<scalar_t>(),
+                u.data<scalar_t>(),
+                dt,
+                batch_size,
+                Iv.size(1),
+                Iv.size(2),
+                Iv.size(3),
+                Iv.size(4));
+            }));
+        }));
+    }
 	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return out;
@@ -131,6 +181,62 @@ __global__ void interp_kernel_backward_2d(
     }
 }
 
+template<typename Real, bool broadcast_I, bool need_I, bool need_u>
+__global__ void interp_kernel_backward_3d(
+        Real* __restrict__ d_I,
+        Real* __restrict__ d_u,
+        const Real* __restrict__ grad_out,
+        const Real* __restrict__ I,
+        const Real* __restrict__ u,
+        double dt,
+        size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= nx || j >= ny) return;
+    const int nxy = nx*ny;
+    const Real* In = I; // pointer to first channel of input
+    Real* d_In = d_I; // pointer to first channel of gradient wrt input
+    const Real* un = u; // pointer to current vector field v
+    Real* d_un = d_u; // pointer to gradient wrt current vector field v
+    const Real* gon = grad_out;
+    // index of current output point (first component. add nxy for second)
+    int ix = i*ny + j;
+    int iy = ix + nxy;
+    Real Ih=0, gx=0, gy=0; // gradient at interpolated point
+    for (int n=0; n < nn; ++n) {
+        if (broadcast_I) {
+            In = I; // reset to first channel of first image
+            d_In = d_I;
+        }
+        // apply displacement to get interpolated point for this vector field
+        for (int c=0; c < nc; ++c) {
+            for (int k=0; k < nz; ++k) {
+                Real hx = i + dt*un[ix];
+                Real hy = j + dt*un[iy];
+                Real hz = k + dt*un[iy];
+                Real diff = gon[ix];
+                if (need_I) {
+                    atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_In, NULL,
+                        diff, hx, hy, hz, nx, ny, nz);
+                }
+                if (need_u) {
+                    biLerp_grad<Real, DEFAULT_BACKGROUND_STRATEGY>(Ih, gx, gy,
+                        In, hx, hy, nx, ny);
+                    diff *= dt;
+                    d_un[ix] = d_un[ix] + gx*diff;
+                    d_un[iy] = d_un[iy] + gy*diff;
+                }
+            }
+            // move to next channel/image
+            In += nxy;
+            d_In += nxy;
+            gon += nxy;
+        }
+        un += 3*nxy;
+        d_un += 3*nxy;
+    }
+}
+
 std::vector<at::Tensor> interp_cuda_backward(
     at::Tensor grad_out,
     at::Tensor Iv,
@@ -138,6 +244,8 @@ std::vector<at::Tensor> interp_cuda_backward(
     double dt,
     bool need_I,
     bool need_u) {
+    auto d = Iv.dim() - 2;
+    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional interpolation is supported")
     const dim3 threads(16, 32);
     const dim3 blocks((Iv.size(2) + threads.x - 1) / threads.x,
                     (Iv.size(3) + threads.y - 1) / threads.y);
@@ -149,26 +257,50 @@ std::vector<at::Tensor> interp_cuda_backward(
     at::Tensor d_I = at::zeros_like(Iv);
     at::Tensor d_u = at::zeros_like(u);
 
-    LAGOMORPH_DISPATCH_BOOL(need_I, needI, ([&] {
-        LAGOMORPH_DISPATCH_BOOL(need_u, needu, ([&] {
-            LAGOMORPH_DISPATCH_BOOL(broadcast_I, bcastI, ([&] {
-                AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_backward", ([&] {
-                interp_kernel_backward_2d<scalar_t, bcastI, needI,
-                        needu><<<blocks, threads>>>(
-                    d_I.data<scalar_t>(),
-                    d_u.data<scalar_t>(),
-                    grad_out.data<scalar_t>(),
-                    Iv.data<scalar_t>(),
-                    u.data<scalar_t>(),
-                    dt,
-                    batch_size,
-                    Iv.size(1),
-                    Iv.size(2),
-                    Iv.size(3));
+    if (d == 2) {
+        LAGOMORPH_DISPATCH_BOOL(need_I, needI, ([&] {
+            LAGOMORPH_DISPATCH_BOOL(need_u, needu, ([&] {
+                LAGOMORPH_DISPATCH_BOOL(broadcast_I, bcastI, ([&] {
+                    AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_backward", ([&] {
+                    interp_kernel_backward_2d<scalar_t, bcastI, needI,
+                            needu><<<blocks, threads>>>(
+                        d_I.data<scalar_t>(),
+                        d_u.data<scalar_t>(),
+                        grad_out.data<scalar_t>(),
+                        Iv.data<scalar_t>(),
+                        u.data<scalar_t>(),
+                        dt,
+                        batch_size,
+                        Iv.size(1),
+                        Iv.size(2),
+                        Iv.size(3));
+                    }));
                 }));
             }));
         }));
-    }));
+    } else {
+        LAGOMORPH_DISPATCH_BOOL(need_I, needI, ([&] {
+            LAGOMORPH_DISPATCH_BOOL(need_u, needu, ([&] {
+                LAGOMORPH_DISPATCH_BOOL(broadcast_I, bcastI, ([&] {
+                    AT_DISPATCH_FLOATING_TYPES(Iv.type(), "interp_cuda_backward", ([&] {
+                    interp_kernel_backward_3d<scalar_t, bcastI, needI,
+                            needu><<<blocks, threads>>>(
+                        d_I.data<scalar_t>(),
+                        d_u.data<scalar_t>(),
+                        grad_out.data<scalar_t>(),
+                        Iv.data<scalar_t>(),
+                        u.data<scalar_t>(),
+                        dt,
+                        batch_size,
+                        Iv.size(1),
+                        Iv.size(2),
+                        Iv.size(3),
+                        Iv.size(4));
+                    }));
+                }));
+            }));
+        }));
+    }
 	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
 
     return {d_I, d_u};

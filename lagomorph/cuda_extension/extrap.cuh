@@ -4,17 +4,17 @@
 #include "defs.cuh"
 
 template<typename Real>
-__device__ Real get_pixel(int x, int y,
-                          const Real* d_i,
-                          size_t sizeX, size_t sizeY)
+__device__ Real get_value(const Real* d_i,
+                          size_t sizeX, size_t sizeY,
+                          int x, int y)
 {
     auto index =  x * sizeY + y;
     return d_i[index];
 }
 template<typename Real>
-inline __device__ Real get_pixel(int x, int y, int z,
-                                 const Real* d_i,
-                                 size_t sizeX, size_t sizeY, size_t sizeZ)
+inline __device__ Real get_value(const Real* d_i,
+                                 size_t sizeX, size_t sizeY, size_t sizeZ,
+                                 int x, int y, int z)
 {
     auto index = (x * sizeY + y) * sizeZ + z;
     return d_i[index];
@@ -110,18 +110,18 @@ inline __device__ void wrapBackground(int& floorX,int& floorY,int& floorZ,
 template<typename Real, BackgroundStrategy backgroundStrategy>
 inline __device__
 Real
-get_value_safe(const Real* arr, int nx, int ny, int i, int j, Real background=0.0f) {
+get_value_safe(const Real* arr, size_t nx, size_t ny, int i, int j, Real background=0.0f) {
     int ii=i, jj=j;
     // adjust the position of the sample point if required
     if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
         wrap(ii, nx);
         wrap(jj, ny);
-        return arr[ii*ny + jj];
+        return get_value(arr, nx, ny, ii, jj);
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
         clamp(ii, nx);
         clamp(jj, ny);
-        return arr[ii*ny + jj];
+        return get_value(arr, nx, ny, ii, jj);
     }
     else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
 	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
@@ -133,7 +133,50 @@ get_value_safe(const Real* arr, int nx, int ny, int i, int j, Real background=0.
 	}
 
         if (ii >= 0 && ii < nx && jj >= 0 && jj < ny)
-            return arr[ii*ny + jj];
+            return get_value(arr, nx, ny, ii, jj);
+        else
+            return background;
+    }else{
+	// unknown background strategy, don't allow compilation
+	static_assert(backgroundStrategy== BACKGROUND_STRATEGY_WRAP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_CLAMP ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_PARTIAL_ZERO ||
+		      backgroundStrategy== BACKGROUND_STRATEGY_VAL,
+                      "Unknown background strategy");
+	return 0.f;
+    }
+}
+
+template<typename Real, BackgroundStrategy backgroundStrategy>
+inline __device__
+Real
+get_value_safe(const Real* arr, int nx, int ny, int nz, int i, int j, int k, Real background=0.0f) {
+    int ii=i, jj=j, kk=k;
+    // adjust the position of the sample point if required
+    if (backgroundStrategy == BACKGROUND_STRATEGY_WRAP){
+        wrap(ii, nx);
+        wrap(jj, ny);
+        wrap(kk, nz);
+        return get_value(arr, nx, ny, nz, ii, jj, kk);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_CLAMP){
+        clamp(ii, nx);
+        clamp(jj, ny);
+        clamp(kk, nz);
+        return get_value(arr, nx, ny, nz, ii, jj, kk);
+    }
+    else if (backgroundStrategy == BACKGROUND_STRATEGY_VAL ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	     backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+
+	if(backgroundStrategy == BACKGROUND_STRATEGY_ZERO ||
+	   backgroundStrategy == BACKGROUND_STRATEGY_PARTIAL_ZERO){
+	    background = 0.f;
+	}
+
+        if (ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >=0 && kk < nz)
+            return get_value(arr, nx, ny, nz, ii, jj, kk);
         else
             return background;
     }else{
