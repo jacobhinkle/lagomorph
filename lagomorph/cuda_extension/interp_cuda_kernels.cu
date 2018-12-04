@@ -61,13 +61,14 @@ __global__ void interp_kernel_3d(
     for (int n=0; n < nn; ++n) {
         if (broadcast_I) In = I;
         for (int c=0; c < nc; ++c) {
-            for (int k=0; k < nz; ++k) {
+            auto ix = (((n*3)*nx + i)*ny + j)*nz;
+            auto ixout = (((n*nc + c)*nx + i)*ny + j)*nz;
+            for (int k=0; k < nz; ++k, ++ix, ++ixout) {
                 Real fk=static_cast<Real>(k);
-                auto ix = (((n*3)*nx + i)*ny + j)*nz + k;
-                auto hx = fi + dt*u[ix];
-                auto hy = fj + dt*u[ix+nxyz];
+                auto hx = fi + dt*u[ix       ];
+                auto hy = fj + dt*u[ix+  nxyz];
                 auto hz = fk + dt*u[ix+2*nxyz];
-                out[(((n*nc+c)*nx + i)*ny + j)*nz + k] = \
+                out[ixout] = \
                     triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
                         hx, hy, hz, nx, ny, nz);
             }
@@ -200,9 +201,10 @@ __global__ void interp_kernel_backward_3d(
     Real* d_un = d_u; // pointer to gradient wrt current vector field v
     const Real* gon = grad_out;
     // index of current output point (first component. add nxy for second)
-    int ix = i*ny + j;
-    int iy = ix + nxy;
-    Real Ih=0, gx=0, gy=0; // gradient at interpolated point
+    auto ix = i*ny + j;
+    auto iy = ix + nxy;
+    auto iz = iy + nxy;
+    Real Ih=0, gx=0, gy=0, gz=0; // gradient at interpolated point
     for (int n=0; n < nn; ++n) {
         if (broadcast_I) {
             In = I; // reset to first channel of first image
@@ -211,29 +213,33 @@ __global__ void interp_kernel_backward_3d(
         // apply displacement to get interpolated point for this vector field
         for (int c=0; c < nc; ++c) {
             for (int k=0; k < nz; ++k) {
-                Real hx = i + dt*un[ix];
-                Real hy = j + dt*un[iy];
-                Real hz = k + dt*un[iy];
-                Real diff = gon[ix];
+                auto hx = i + dt*un[ix*nz + k];
+                auto hy = j + dt*un[iy*nz + k];
+                auto hz = k + dt*un[iz*nz + k];
+                auto diff = gon[ix*nz + k];
                 if (need_I) {
                     atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_In, NULL,
                         diff, hx, hy, hz, nx, ny, nz);
                 }
                 if (need_u) {
-                    biLerp_grad<Real, DEFAULT_BACKGROUND_STRATEGY>(Ih, gx, gy,
-                        In, hx, hy, nx, ny);
+                    triLerp_grad<Real, DEFAULT_BACKGROUND_STRATEGY>(Ih,
+                        gx, gy, gz,
+                        In,
+                        hx, hy, hz,
+                        nx, ny, nz);
                     diff *= dt;
-                    d_un[ix] = d_un[ix] + gx*diff;
-                    d_un[iy] = d_un[iy] + gy*diff;
+                    d_un[ix*nz+k] = d_un[ix*nz+k] + gx*diff;
+                    d_un[iy*nz+k] = d_un[iy*nz+k] + gy*diff;
+                    d_un[iz*nz+k] = d_un[iz*nz+k] + gz*diff;
                 }
             }
             // move to next channel/image
-            In += nxy;
-            d_In += nxy;
-            gon += nxy;
+            In += nxy*nz;
+            d_In += nxy*nz;
+            gon += nxy*nz;
         }
-        un += 3*nxy;
-        d_un += 3*nxy;
+        un += 3*nxy*nz;
+        d_un += 3*nxy*nz;
     }
 }
 
