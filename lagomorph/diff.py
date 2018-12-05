@@ -32,10 +32,6 @@ def jacobian_times_vectorfield(v, w, displacement=True, transpose=False):
 class JacobianTimesVectorFieldAdjointFunction(torch.autograd.Function):
     """
     The adjoint T(w)^\dagger v, of the linear operation T(w)v = (Dv)w
-
-    If the argument 'displacement' is True (False by default) then the argument
-    v is treated as the displacement of a deformation whose Jacobian matrix
-    should be computed (by adding ones to the diagonal) instead of v itself.
     """
     @staticmethod
     def forward(ctx, v, w):

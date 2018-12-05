@@ -616,7 +616,7 @@ jacobian_times_vectorfield_adjoint_forward_kernel_3d(Real* __restrict__ out, con
                         outn[ix] += -.5 * (wn[iy+nz]*zn[ix+nz] - wn[iy-nz]*zn[ix-nz]);
 
                     if (k == 0)
-                        outn[ix] += -.5 * (wn[iz+1]*zn[ix+1] - wn[iz  ]*zn[ix  ]);
+                        outn[ix] += -.5 * (wn[iz+1]*zn[ix+1] + wn[iz  ]*zn[ix  ]);
                     else if (k == nz-1)
                         outn[ix] +=  .5 * (wn[iz  ]*zn[ix  ] + wn[iz-1]*zn[ix-1]);
                     else
