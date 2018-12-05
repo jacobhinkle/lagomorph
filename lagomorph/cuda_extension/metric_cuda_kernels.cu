@@ -80,10 +80,8 @@ CholeskyFactor( Real& ooG00,
 template <typename Real>
 __device__
 void
-CholeskySolve(  Real& bXr,
-                Real& bXi,
-                Real& bYr,
-                Real& bYi,
+CholeskySolve(  Real& bX,
+                Real& bY,
                 Real ooG00,
                 Real G10, Real ooG11) {
     // back-solve Gy=b to get a temporary vector y
@@ -97,26 +95,18 @@ CholeskySolve(  Real& bXr,
     // [ G(1,1) G(2,1) G(3,1) ]   [ x(1) ] = y(1)
     // [   0    G(2,2) G(3,2) ] * [ x(2) ] = y(2)
     // [   0      0    G(3,3) ]   [ x(3) ] = y(3)
-    auto y0 = bXr * ooG00;
-    auto y1 = (bYr - G10*y0) * ooG11;
-    bYr = y1 * ooG11;
-    bXr = (y0 - G10*bYr) * ooG00;
-
-    y0 = bXi * ooG00;
-    y1 = (bYi - G10*y0) * ooG11;
-    bYi = y1 * ooG11;
-    bXi = (y0 - G10*bYi) * ooG00;
+    auto y0 = bX * ooG00;
+    auto y1 = (bY - G10*y0) * ooG11;
+    bY = y1 * ooG11;
+    bX = (y0 - G10*bY) * ooG00;
 }
 
 template <typename Real>
 __device__
 void
-CholeskySolve(  Real& bXr,
-                Real& bXi,
-                Real& bYr,
-                Real& bYi,
-                Real& bZr,
-                Real& bZi,
+CholeskySolve(  Real& bX,
+                Real& bY,
+                Real& bZ,
                 Real ooG00,
                 Real   G10, Real ooG11,
                 Real   G20, Real   G21, Real ooG22) {
@@ -131,62 +121,42 @@ CholeskySolve(  Real& bXr,
     // [ G(1,1) G(2,1) G(3,1) ]   [ x(1) ] = y(1)
     // [   0    G(2,2) G(3,2) ] * [ x(2) ] = y(2)
     // [   0      0    G(3,3) ]   [ x(3) ] = y(3)
-    auto y0 = bXr * ooG00;
-    auto y1 = (bYr - G10*y0) * ooG11;
-    auto y2 = (bZr - G20*y0 - G21*y1) * ooG22;
-    bZr = y2 * ooG22;
-    bYr = (y1 - G21*bZr) * ooG11;
-    bXr = (y0 - G10*bYr - G20*bZr) * ooG00;
-
-    y0 = bXi * ooG00;
-    y1 = (bYi - G10*y0) * ooG11;
-    y2 = (bZi - G20*y0 - G21*y1) * ooG22;
-    bZi = y2 * ooG22;
-    bYi = (y1 - G21*bZi) * ooG11;
-    bXi = (y0 - G10*bYi - G20*bZi) * ooG00;
+    auto y0 = bX * ooG00;
+    auto y1 = (bY - G10*y0) * ooG11;
+    auto y2 = (bZ - G20*y0 - G21*y1) * ooG22;
+    bZ = y2 * ooG22;
+    bY = (y1 - G21*bZ) * ooG11;
+    bX = (y0 - G10*bY - G20*bZ) * ooG00;
 }
 
 template <typename Real>
 __device__
 void
-OperatorMultiply(Real& bXr,
-                 Real& bXi,
-                 Real& bYr,
-                 Real& bYi,
+OperatorMultiply(Real& bX,
+                 Real& bY,
                  Real L00,
                  Real L10, Real L11) {
     // We need a temporary to avoid aliasing
-    auto x = L00*bXr + L10*bYr;
-    bYr = L10*bXr + L11*bYr;
-    bXr = x;
-    x = L00*bXi + L10*bYi;
-    bYi = L10*bXi + L11*bYi;
-    bXi = x;
+    auto x = L00*bX + L10*bY;
+    bY = L10*bX + L11*bY;
+    bX = x;
 }
 
 template <typename Real>
 __device__
 void
-OperatorMultiply(Real& bXr,
-                 Real& bXi,
-                 Real& bYr,
-                 Real& bYi,
-                 Real& bZr,
-                 Real& bZi,
+OperatorMultiply(Real& bX,
+                 Real& bY,
+                 Real& bZ,
                  Real L00,
                  Real L10, Real L11,
                  Real L20, Real L21, Real L22) {
     // We need a temporary to avoid aliasing
-    auto x = L00*bXr + L10*bYr + L20*bZr;
-    auto y = L10*bXr + L11*bYr + L21*bZr;
-    bZr = L20*bXr + L21*bYr + L22*bZr;
-    bXr = x;
-    bYr = y;
-    x = L00*bXi + L10*bYi + L20*bZi;
-    y = L10*bXi + L11*bYi + L21*bZi;
-    bZi = L20*bXi + L21*bYi + L22*bZi;
-    bXi = x;
-    bYi = y;
+    auto x = L00*bX + L10*bY + L20*bZ;
+    auto y = L10*bX + L11*bY + L21*bZ;
+    bZ = L20*bX + L21*bY + L22*bZ;
+    bX = x;
+    bY = y;
 }
 
 template <typename Real, bool inverseOp>
@@ -233,10 +203,13 @@ fluid_kernel_2d(Real* __restrict__ Fm,
       // compute L (it is symmetric, only need lower triangular part)
       //
       Real Fmxr=Fm[ix], Fmxi=Fm[ix+1], Fmyr=Fm[iy], Fmyi=Fm[iy+1];
-      if (inverseOp)
-        CholeskySolve<Real>(Fmxr, Fmxi, Fmyr, Fmyi, ooG00, G10, ooG11);
-      else
-        OperatorMultiply(Fmxr, Fmxi, Fmyr, Fmyi, L00, L10, L11);
+      if (inverseOp) {
+          CholeskySolve<Real>(Fmxr, Fmyr, ooG00, G10, ooG11);
+          CholeskySolve<Real>(Fmxi, Fmyi, ooG00, G10, ooG11);
+      } else {
+          OperatorMultiply(Fmxr, Fmyr, L00, L10, L11);
+          OperatorMultiply(Fmxi, Fmyi, L00, L10, L11);
+      }
       Fm[ix] = Fmxr;
       Fm[ix+1] = Fmxi;
       Fm[iy] = Fmyr;
@@ -260,10 +233,6 @@ fluid_kernel_3d(Real* __restrict__ Fm,
     const Real wy = cosY[j];
 
     const auto nxyz = 2*nx*ny*nz;
-    // indices into the FFT
-    auto ix     = 2*(j + i * ny)*nz;
-    auto iy     = ix + nxyz;
-    auto iz     = iy + nxyz;
 
     for (size_t k=0; k < nz; ++k) {
         const Real wz = cosZ[k];
@@ -296,6 +265,10 @@ fluid_kernel_3d(Real* __restrict__ Fm,
                                    L10, L11,
                                    L20, L21, L22);
         }
+        // indices into the FFT
+        auto ix     = 2*(j + i * ny)*nz+2*k;
+        auto iy     = ix + nxyz;
+        auto iz     = iy + nxyz;
         for (size_t n=0; n < nn; ++n, ix+=3*nxyz, iy+=3*nxyz, iz+=3*nxyz) {
           //
           // compute L (it is symmetric, only need lower triangular part)
@@ -303,22 +276,31 @@ fluid_kernel_3d(Real* __restrict__ Fm,
           Real Fmxr=Fm[ix], Fmxi=Fm[ix+1];
           Real Fmyr=Fm[iy], Fmyi=Fm[iy+1];
           Real Fmzr=Fm[iz], Fmzi=Fm[iz+1];
-          if (inverseOp)
-            CholeskySolve<Real>(Fmxr, Fmyr, Fmzr, Fmxi, Fmyi, Fmzi,
-                                 ooG00,
-                                   G10, ooG11,
-                                   G20,   G21, ooG22);
-          else
-            OperatorMultiply(Fmxr, Fmyr, Fmzr, Fmxi, Fmyi, Fmzi,
-                L00,
-                L10, L11,
-                L20, L21, L22);
-          Fm[ix+2*k] = Fmxr;
-          Fm[ix+2*k+1] = Fmxi;
-          Fm[iy+2*k] = Fmyr;
-          Fm[iy+2*k+1] = Fmyi;
-          Fm[iz+2*k] = Fmzr;
-          Fm[iz+2*k+1] = Fmzi;
+          if (inverseOp) {
+                CholeskySolve<Real>(Fmxr, Fmyr, Fmzr,
+                                  ooG00,
+                                    G10, ooG11,
+                                    G20,   G21, ooG22);
+                CholeskySolve<Real>(Fmxi, Fmyi, Fmzi,
+                                  ooG00,
+                                    G10, ooG11,
+                                    G20,   G21, ooG22);
+          } else {
+                OperatorMultiply(Fmxr, Fmyr, Fmzr,
+                    L00,
+                    L10, L11,
+                    L20, L21, L22);
+                OperatorMultiply(Fmxi, Fmyi, Fmzi,
+                    L00,
+                    L10, L11,
+                    L20, L21, L22);
+          }
+          Fm[ix] = Fmxr;
+          Fm[ix+1] = Fmxi;
+          Fm[iy] = Fmyr;
+          Fm[iy+1] = Fmyi;
+          Fm[iz] = Fmzr;
+          Fm[iz+1] = Fmzi;
         }
     }
 }
