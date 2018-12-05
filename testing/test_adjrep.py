@@ -16,7 +16,7 @@ np.random.seed(1)
 torch.manual_seed(1)
 
 res = 2 # which resolutions to test
-dims = [2] # which dimensions to test
+dims = [2,3] # which dimensions to test
 batch_sizes = [1,2] # which batch sizes to test
 
 @pytest.mark.parametrize("bs", batch_sizes)
