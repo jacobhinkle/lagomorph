@@ -15,7 +15,7 @@ from testing.utils import catch_gradcheck
 np.random.seed(1)
 torch.manual_seed(1)
 
-res = 3 # which resolution to test
+res = 2 # which resolution to test
 dims = [2,3] # which dimensions to test
 channels = [1,2,4] # numbers of channels to test
 batch_sizes = [1,2] # which batch sizes to test
@@ -41,7 +41,7 @@ def test_affine_interp_identity(bs, dim, c):
 @pytest.mark.parametrize("testI", TF)
 @pytest.mark.parametrize("testA", TF)
 @pytest.mark.parametrize("testT", TF)
-def test_affine_interp_gradcheck_I(bs, dim, c, testI, testA, testT):
+def test_affine_interp_gradcheck(bs, dim, c, testI, testA, testT):
     if not (testI or testA or testT): return # nothing to test
     imsh = tuple([bs,c]+[res]*dim)
     I = torch.randn(imsh, dtype=torch.float64, requires_grad=testI).cuda()
@@ -85,3 +85,22 @@ def test_affine_inverse(bs, dim):
     y = torch.matmul(A, x) + T.unsqueeze(2)
     xhat = torch.matmul(Ainv, y) + Tinv.unsqueeze(2)
     assert torch.allclose(x, xhat), f"Failed affine inverse with batch size {bs} dim {dim}"
+
+@pytest.mark.parametrize("bs", batch_sizes)
+@pytest.mark.parametrize("dim", dims)
+@pytest.mark.parametrize("c", channels)
+def test_regrid_gradcheck(bs, dim, c):
+    imsh = tuple([bs,c]+[res]*dim)
+    I = torch.randn(imsh, dtype=torch.float64, requires_grad=True).cuda()
+    outshape = [res+1]*dim
+    foo = lambda J: lm.regrid(J, shape=outshape, displacement=False)
+    catch_gradcheck("Failed regrid gradcheck", foo, (I,))
+
+@pytest.mark.parametrize("bs", batch_sizes)
+@pytest.mark.parametrize("dim", dims)
+def test_regrid_displacement_gradcheck(bs, dim):
+    imsh = tuple([bs,dim]+[res]*dim)
+    I = torch.randn(imsh, dtype=torch.float64, requires_grad=True).cuda()
+    outshape = [res+1]*dim
+    foo = lambda J: lm.regrid(J, shape=outshape, displacement=True)
+    catch_gradcheck("Failed regrid displacement gradcheck", foo, (I,))

@@ -1,5 +1,7 @@
 import torch
+import numpy as np
 import lagomorph_cuda
+import math, ctypes
 
 class AffineInterpFunction(torch.autograd.Function):
     """Interpolate an image using an affine transformation, parametrized by a
@@ -114,3 +116,132 @@ def rigid_inverse(v, T):
     Rinv = rotation_exp_map(negv)
     Tinv = -torch.matmul(Rinv, T.unsqueeze(2)).squeeze(2)
     return (negv, Tinv)
+
+class RegridFunction(torch.autograd.Function):
+    """Interpolate an image from one grid to another."""
+    @staticmethod
+    def forward(ctx, I, outshape, origin, spacing, displacement):
+        outshape = [int(s) for s in outshape]
+        origin = [float(o) for o in origin]
+        spacing = [float(s) for s in spacing]
+        ctx.inshape = I.shape[2:]
+        ctx.outshape = outshape
+        ctx.outorigin = origin
+        ctx.outspacing = spacing
+        ctx.displacement = displacement
+        reg = lagomorph_cuda.regrid_forward(
+            I.contiguous(),
+            outshape,
+            origin,
+            spacing)
+        if displacement:
+            dim = len(I.shape) - 2
+            if I.shape[1] != dim:
+                raise ValueError("Incorrect num channels for regridding displacement")
+            ctx.spacing_tensor = 1./torch.Tensor(spacing).type(reg.type()).to(reg.device).view(1,dim,*[1]*dim)
+            reg = reg * ctx.spacing_tensor
+        return reg
+    @staticmethod
+    def backward(ctx, grad_out):
+        d_I = lagomorph_cuda.regrid_backward(
+            grad_out.contiguous(),
+            ctx.inshape,
+            ctx.outshape,
+            ctx.outorigin,
+            ctx.outspacing)
+        if ctx.displacement:
+            d_I = d_I * ctx.spacing_tensor
+        return d_I, None, None, None, None
+def regrid(I, shape=None, origin=None, spacing=None, displacement=False):
+    """Interpolate from one regular grid to another.
+
+    The input grid is assumed to have the origin at (N-1)/2 where N is the size
+    of a given dimension, and a spacing of 1.
+
+    The output grid is determined by providing at least one of the optional
+    arguments shape, origin, and spacing. If any of these are scalar, that value
+    will be used in every dimension. The following are the rules used, with the
+    given parameters in parentheses:
+
+        () An exception is raised
+
+        (spacing) Origin is assumed at the center of the image, and shape is
+        determined in order to cover the original image domain, placing voxels
+        slightly outside the domain if necessary.
+
+        (origin) We simply translate the image by the difference in origins,
+        which is equivalent to assuming the same output shape and spacing as the
+        input.
+
+        (origin, spacing) An exception is raised.
+
+        (shape) Origin is assumed to be (I.shape-1)/2, and spacing is determined
+        such that corner voxels are placed in the same place as in the input
+        image: spacing = (outshape-1)/(inshape-1)
+
+        (shape, spacing) Origin is assumed to be the middle of the image.
+
+        (shape, origin) Spacing is assumed to be 1, as this can be used to
+        easily extract a small ROI.
+
+        (shape, origin, spacing) Specified values are used with no modification.
+
+
+    The expected common use case will be upscaling an image or vector field by
+    only providing the new shape.
+
+    Note that _downscaling_ using this method is not wise. You can downscale by
+    integer factors in a simple way using PyTorch's built in mean pooling.
+    Alternatively, you could Gaussian filter the image then apply this function.
+
+    If the 'displacement' argument is True, then in addition to interpolating to
+    the new grid, the values will be scaled by the spacing in each dimension.
+    This is only valid if the number of channels in the input is equal to the
+    spatial dimension.
+    """
+    if shape is None:
+        if origin is None:
+            if spacing is None:
+                raise ValueError("At least one of shape, origin, or spacing required")
+            else:
+                raise NotImplementedError
+        else:
+            if spacing is None:
+                raise NotImplementedError
+            else:
+                raise ValueError("Shape is required if specifying origin and spacing")
+    else:
+        if origin is None:
+            origin = tuple([(s-1)*.5 for s in I.shape[2:]])
+            if spacing is None:
+                spacing = tuple([(sI-1)/(s-1)
+                            for sI, s in zip(I.shape[2:],shape)])
+        else:
+            if spacing is None:
+                raise NotImplementedError
+            else:
+                raise NotImplementedError
+
+    d = len(I.shape)-2
+    if not isinstance(shape, (list,tuple)):
+        shape = tuple([shape]*d)
+    if not isinstance(origin, (list,tuple)):
+        origin = tuple([origin]*d)
+    if not isinstance(spacing, (list,tuple)):
+        spacing = tuple([spacing]*d)
+    assert len(shape)==d
+    assert len(origin)==d
+    assert len(spacing)==d
+
+    return RegridFunction.apply(I, shape, origin, spacing, displacement)
+
+
+class RegridModule(torch.nn.Module):
+    """Module wrapper for RegridFunction"""
+    def __init__(self, shape, origin, spacing):
+        super(RegridModule, self).__init__()
+        self.shape = shape
+        self.origin = origin
+        self.spacing = spacing
+    def forward(self, I):
+        return regrid(I, self.shape, self.origin, self.spacing)

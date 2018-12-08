@@ -37,6 +37,17 @@ std::vector<at::Tensor> affine_interp_cuda_backward(
     bool need_I,
     bool need_A,
     bool need_T);
+at::Tensor regrid_forward(
+    at::Tensor I,
+    std::vector<int> shape,
+    std::vector<double> origin,
+    std::vector<double> spacing);
+at::Tensor regrid_backward(
+    at::Tensor grad_out,
+    std::vector<int> inshape,
+    std::vector<int> shape,
+    std::vector<double> origin,
+    std::vector<double> spacing);
 at::Tensor jacobian_times_vectorfield_forward(
     at::Tensor g,
     at::Tensor v,
@@ -142,6 +153,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("set_debug_mode", &set_debug_mode, "Set debug (sync) mode");
   m.def("affine_interp_forward", &affine_interp_forward, "Affine interp forward (CUDA)");
   m.def("affine_interp_backward", &affine_interp_backward, "Affine interp backward (CUDA)");
+  m.def("regrid_forward", &regrid_forward, "Regrid forward (CUDA)");
+  m.def("regrid_backward", &regrid_backward, "Regrid backward (CUDA)");
   m.def("fluid_operator", &fluid_operator, "Fluid forward and inverse FFT operator");
   m.def("interp_forward", &interp_forward, "Free-form interp forward (CUDA)");
   m.def("interp_backward", &interp_backward, "Free-form interp backward (CUDA)");

@@ -61,7 +61,7 @@ __global__ void interp_kernel_3d(
     for (int n=0; n < nn; ++n) {
         if (broadcast_I) In = I;
         for (int c=0; c < nc; ++c) {
-            auto ix = (((n*3)*nx + i)*ny + j)*nz;
+            auto ix =    (((n*3     )*nx + i)*ny + j)*nz;
             auto ixout = (((n*nc + c)*nx + i)*ny + j)*nz;
             for (int k=0; k < nz; ++k, ++ix, ++ixout) {
                 Real fk=static_cast<Real>(k);

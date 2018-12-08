@@ -604,3 +604,242 @@ std::vector<at::Tensor> affine_interp_cuda_backward(
 
     return {d_I, d_A, d_T};
 }
+
+template<typename Real>
+__global__ void regrid_forward_kernel_2d(
+        Real* __restrict__ out,
+        const Real* __restrict__ I,
+        int Nx, int Ny,
+        double Ox, double Oy,
+        double Sx, double Sy,
+        size_t nn, size_t nc, size_t nx, size_t ny) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= Nx || j >= Ny) return;
+    const int Nxy = Nx*Ny;
+    const Real* In = I;
+    Real* outn = out;
+    int ix = i*Ny + j;
+    // center in new coordinates
+    Real ox = .5*static_cast<Real>(Nx-1);
+    Real oy = .5*static_cast<Real>(Ny-1);
+    auto hx = (i-ox)*Sx + Ox;
+    auto hy = (j-oy)*Sy + Oy;
+    for (int n=0; n < nn; ++n) {
+        for (int c=0; c < nc; ++c) {
+            auto Inx = biLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
+                hx, hy,
+                nx, ny);
+            outn[ix] = Inx;
+            outn += Nxy;
+            In += Nxy;
+        }
+    }
+}
+
+template<typename Real>
+__global__ void regrid_forward_kernel_3d(
+        Real* __restrict__ out,
+        const Real* __restrict__ I,
+        int Nx, int Ny, int Nz,
+        double Ox, double Oy, double Oz,
+        double Sx, double Sy, double Sz,
+        size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= Nx || j >= Ny) return;
+    const int Nxyz = Nx*Ny*Nz;
+    const Real* In = I;
+    Real* outn = out;
+    int ix = (i*Ny + j)*Nz;
+    // center in new coordinates
+    Real ox = .5*static_cast<Real>(Nx-1);
+    Real oy = .5*static_cast<Real>(Ny-1);
+    Real oz = .5*static_cast<Real>(Nz-1);
+    auto hx = (i-ox)*Sx + Ox;
+    auto hy = (j-oy)*Sy + Oy;
+    for (int n=0; n < nn; ++n) {
+        for (int c=0; c < nc; ++c) {
+            for (int k=0; k < Nz; ++k) {
+                auto hz = (k-oz)*Sz + Oz;
+                auto Inx = triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
+                    hx, hy, hz,
+                    nx, ny, nz);
+                outn[ix+k] = Inx;
+            }
+            outn += Nxyz;
+            In += Nxyz;
+        }
+    }
+}
+
+at::Tensor regrid_forward(
+    at::Tensor I,
+    std::vector<int> shape,
+    std::vector<double> origin,
+    std::vector<double> spacing) {
+    auto d = I.dim() - 2;
+    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
+    AT_ASSERTM(shape.size() == d, "Shape should be vector of size d (not 2+d)")
+    AT_ASSERTM(origin.size() == d, "Origin should be vector of size d (not 2+d)")
+    AT_ASSERTM(spacing.size() == d, "Spacing should be vector of size d (not 2+d)")
+
+    const dim3 threads(32, 32);
+    const dim3 blocks((shape[0] + threads.x - 1) / threads.x,
+                    (shape[1] + threads.y - 1) / threads.y);
+
+    at::Tensor Itx;
+
+    if (d == 2) {
+        Itx = at::zeros({I.size(0), I.size(1), shape[0], shape[1]}, I.type());
+        AT_DISPATCH_FLOATING_TYPES(I.type(), "regrid_forward", ([&] {
+        regrid_forward_kernel_2d<scalar_t><<<blocks, threads>>>(
+            Itx.data<scalar_t>(),
+            I.data<scalar_t>(),
+            shape[0], shape[1],
+            origin[0], origin[1],
+            spacing[0], spacing[1],
+            I.size(0),
+            I.size(1),
+            I.size(2),
+            I.size(3));
+        }));
+    } else {
+        Itx = at::zeros({I.size(0), I.size(1), shape[0], shape[1], shape[2]}, I.type());
+        AT_DISPATCH_FLOATING_TYPES(I.type(), "regrid_forward", ([&] {
+        regrid_forward_kernel_3d<scalar_t><<<blocks, threads>>>(
+            Itx.data<scalar_t>(),
+            I.data<scalar_t>(),
+            shape[0], shape[1], shape[2],
+            origin[0], origin[1], origin[2],
+            spacing[0], spacing[1], spacing[2],
+            I.size(0),
+            I.size(1),
+            I.size(2),
+            I.size(3),
+            I.size(4));
+        }));
+    }
+	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
+
+    return Itx;
+}
+
+template<typename Real>
+__global__ void regrid_backward_kernel_2d(
+        Real* __restrict__ d_I,
+        const Real* __restrict__ grad_out,
+        size_t Nx, size_t Ny,
+        double Ox, double Oy,
+        double Sx, double Sy,
+        size_t nn, size_t nc, size_t nx, size_t ny) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= Nx || j >= Ny) return;
+    const int Nxy = Nx*Ny;
+    Real* d_In = d_I;
+    const Real* gon = grad_out;
+    int ix = i*Ny + j;
+    // center in new coordinates
+    Real ox = .5*static_cast<Real>(Nx-1);
+    Real oy = .5*static_cast<Real>(Ny-1);
+    auto hx = (i-ox)*Sx + Ox;
+    auto hy = (j-oy)*Sy + Oy;
+    for (int n=0; n < nn; ++n) {
+        for (int c=0; c < nc; ++c) {
+            atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_In, NULL,
+                gon[ix], hx, hy, nx, ny);
+            gon += Nxy;
+            d_In += Nxy;
+        }
+    }
+}
+
+template<typename Real>
+__global__ void regrid_backward_kernel_3d(
+        Real* __restrict__ d_I,
+        const Real* __restrict__ grad_out,
+        size_t Nx, size_t Ny, size_t Nz,
+        double Ox, double Oy, double Oz,
+        double Sx, double Sy, double Sz,
+        size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    const int j = blockDim.y*blockIdx.y + threadIdx.y;
+    if (i >= Nx || j >= Ny) return;
+    const int Nxyz = Nx*Ny*Nz;
+    Real* d_In = d_I;
+    const Real* gon = grad_out;
+    int ix = (i*Ny + j)*Nz;
+    // center in new coordinates
+    Real ox = .5*static_cast<Real>(Nx-1);
+    Real oy = .5*static_cast<Real>(Ny-1);
+    Real oz = .5*static_cast<Real>(Nz-1);
+    auto hx = (i-ox)*Sx + Ox;
+    auto hy = (j-oy)*Sy + Oy;
+    for (int n=0; n < nn; ++n) {
+        for (int c=0; c < nc; ++c) {
+            for (int k=0; k < Nz; ++k) {
+                auto hz = (k-oz)*Sz + Oz;
+                atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_In, NULL,
+                    gon[ix+k], hx, hy, hz, nx, ny, nz);
+            }
+            gon += Nxyz;
+            d_In += Nxyz;
+        }
+    }
+}
+
+at::Tensor regrid_backward(
+    at::Tensor grad_out,
+    std::vector<int> inshape,
+    std::vector<int> shape,
+    std::vector<double> origin,
+    std::vector<double> spacing) {
+    auto d = grad_out.dim() - 2;
+    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
+    AT_ASSERTM(inshape.size() == d, "Input shape should be vector of size d (not 2+d)")
+    AT_ASSERTM(shape.size() == d, "Shape should be vector of size d (not 2+d)")
+    AT_ASSERTM(origin.size() == d, "Origin should be vector of size d (not 2+d)")
+    AT_ASSERTM(spacing.size() == d, "Spacing should be vector of size d (not 2+d)")
+
+    const dim3 threads(32, 32);
+    const dim3 blocks((shape[0] + threads.x - 1) / threads.x,
+                    (shape[1] + threads.y - 1) / threads.y);
+
+    at::Tensor d_I;
+
+    if (d == 2) {
+        d_I = at::zeros({grad_out.size(0), grad_out.size(1), inshape[0], inshape[1]}, grad_out.type());
+        AT_DISPATCH_FLOATING_TYPES(grad_out.type(), "regrid_backward", ([&] {
+        regrid_backward_kernel_2d<scalar_t><<<blocks, threads>>>(
+            d_I.data<scalar_t>(),
+            grad_out.data<scalar_t>(),
+            shape[0], shape[1],
+            origin[0], origin[1],
+            spacing[0], spacing[1],
+            d_I.size(0),
+            d_I.size(1),
+            inshape[0],
+            inshape[1]);
+        }));
+    } else {
+        d_I = at::zeros({grad_out.size(0), grad_out.size(1), inshape[0], inshape[1], inshape[2]}, grad_out.type());
+        AT_DISPATCH_FLOATING_TYPES(grad_out.type(), "regrid_backward", ([&] {
+        regrid_backward_kernel_3d<scalar_t><<<blocks, threads>>>(
+            d_I.data<scalar_t>(),
+            grad_out.data<scalar_t>(),
+            shape[0], shape[1], shape[2],
+            origin[0], origin[1], origin[2],
+            spacing[0], spacing[1], spacing[2],
+            d_I.size(0),
+            d_I.size(1),
+            inshape[0],
+            inshape[1],
+            inshape[2]);
+        }));
+    }
+	LAGOMORPH_CUDA_CHECK(__FILE__,__LINE__);
+
+    return d_I;
+}
+
