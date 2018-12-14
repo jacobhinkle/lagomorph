@@ -1,4 +1,7 @@
-# `lagomorph`: Large Scale Computational Anatomy in PyTorch
+# lagomorph: Large Scale Computational Anatomy in PyTorch
+
+[![PyPI version](https://badge.fury.io/py/lagomorph.svg)](https://badge.fury.io/py/lagomorph)
+[![Python 3.6](https://img.shields.io/badge/python-3.6-blue.svg)](https://www.python.org/downloads/release/python-360/)
 
 Lagomorph aims to provide tools for [computational
 anatomy](https://en.wikipedia.org/wiki/Computational_anatomy) in the context of
