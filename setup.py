@@ -3,7 +3,7 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
     name="lagomorph",
-    version="0.2.1",
+    version="1.0.0",
     author='Jacob Hinkle',
     author_email='jacob.hinkle@gmail.com',
     url='https://github.com/jacobhinkle/lagomorph',
