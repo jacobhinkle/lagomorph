@@ -1,4 +1,7 @@
-# `lagomorph`: Large Scale Computational Anatomy in PyTorch
+# lagomorph: Large Scale Computational Anatomy in PyTorch
+
+[![PyPI version](https://badge.fury.io/py/lagomorph.svg)](https://badge.fury.io/py/lagomorph)
+[![Python 3.6](https://img.shields.io/badge/python-3.6-blue.svg)](https://www.python.org/downloads/release/python-360/)
 
 Lagomorph aims to provide tools for [computational
 anatomy](https://en.wikipedia.org/wiki/Computational_anatomy) in the context of
@@ -69,15 +72,3 @@ PyTorch, whose ATen C++ library makes it very easy to support multiple backends
 (we plan to provide an AMD ROCm version at some point). This allows us to
 leverage all the engineering done by PyTorch contributors toward NCCL2 support
 and other challenges.
-
-# Completeness and Roadmap
-
-As of November 2018, we have working affine interpolation (and rigid) as well as
-free-form deformation and LDDMM via big CoAd (aka tilde variables) EPDiff, all
-in 2D. The examples are a work in progress and most were written toward the
-PyCUDA interface.
-
-Before a 1.0 release, we plan to have 3D versions of affine and FluidMetric
-working and passing tests.
-
-After 1.0, I imagine supporting more methods like landmarks and B-splines.

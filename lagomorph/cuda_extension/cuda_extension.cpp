@@ -37,6 +37,17 @@ std::vector<at::Tensor> affine_interp_cuda_backward(
     bool need_I,
     bool need_A,
     bool need_T);
+at::Tensor regrid_forward(
+    at::Tensor I,
+    std::vector<int> shape,
+    std::vector<double> origin,
+    std::vector<double> spacing);
+at::Tensor regrid_backward(
+    at::Tensor grad_out,
+    std::vector<int> inshape,
+    std::vector<int> shape,
+    std::vector<double> origin,
+    std::vector<double> spacing);
 at::Tensor jacobian_times_vectorfield_forward(
     at::Tensor g,
     at::Tensor v,
@@ -66,9 +77,7 @@ void fluid_operator_cuda(
     std::vector<at::Tensor> sinlut,
     double alpha,
     double beta,
-    double gamma,
-    const int cutoffX,
-    const int cutoffY);
+    double gamma);
 
 
 void set_debug_mode(bool mode) {
@@ -130,22 +139,22 @@ void fluid_operator(
     const std::vector<at::Tensor> sinluts,
     const double alpha,
     const double beta,
-    const double gamma,
-    const int cutoffX,
-    const int cutoffY) {
+    const double gamma) {
     CHECK_INPUT(Fmv);
     size_t dim = Fmv.dim() - 3; // note that pytorch fft adds a dimension (size 2)
     AT_ASSERTM(cosluts.size() == dim, "Must provide same number cosine LUTs ("
             + std::to_string(cosluts.size()) + ") as spatial dimension '" + std::to_string(dim) + "'")
     AT_ASSERTM(sinluts.size() == dim, "Must provide same number sine LUTs ("
             + std::to_string(sinluts.size()) + ") as spatial dimension '" + std::to_string(dim) + "'")
-    return fluid_operator_cuda(Fmv, inverse, cosluts, sinluts, alpha, beta, gamma, cutoffX, cutoffY);
+    return fluid_operator_cuda(Fmv, inverse, cosluts, sinluts, alpha, beta, gamma);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("set_debug_mode", &set_debug_mode, "Set debug (sync) mode");
   m.def("affine_interp_forward", &affine_interp_forward, "Affine interp forward (CUDA)");
   m.def("affine_interp_backward", &affine_interp_backward, "Affine interp backward (CUDA)");
+  m.def("regrid_forward", &regrid_forward, "Regrid forward (CUDA)");
+  m.def("regrid_backward", &regrid_backward, "Regrid backward (CUDA)");
   m.def("fluid_operator", &fluid_operator, "Fluid forward and inverse FFT operator");
   m.def("interp_forward", &interp_forward, "Free-form interp forward (CUDA)");
   m.def("interp_backward", &interp_backward, "Free-form interp backward (CUDA)");

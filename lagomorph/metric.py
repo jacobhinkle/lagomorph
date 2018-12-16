@@ -7,16 +7,15 @@ import numpy as np
 
 class FluidMetricOperator(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, params, luts, inverse, cutoffs, mv):
+    def forward(ctx, params, luts, inverse, mv):
         ctx.params = params
         ctx.luts = luts
         ctx.inverse = inverse
-        ctx.cutoffs = cutoffs
         sh = mv.shape
         spatial_dim = len(sh)-2
         Fmv = torch.rfft(mv, spatial_dim, normalized=True)
         lagomorph_cuda.fluid_operator(Fmv, inverse,
-                luts['cos'], luts['sin'], *params, *cutoffs)
+                luts['cos'], luts['sin'], *params)
         return torch.irfft(Fmv, spatial_dim, normalized=True,
                 signal_sizes=sh[2:])
     @staticmethod
@@ -25,8 +24,8 @@ class FluidMetricOperator(torch.autograd.Function):
         spatial_dim = len(sh)-2
         Fmv = torch.rfft(outgrad, spatial_dim, normalized=True)
         lagomorph_cuda.fluid_operator(Fmv, ctx.inverse,
-                ctx.luts['cos'], ctx.luts['sin'], *ctx.params, *ctx.cutoffs)
-        return None, None, None, None, torch.irfft(Fmv, spatial_dim, normalized=True,
+                ctx.luts['cos'], ctx.luts['sin'], *ctx.params)
+        return None, None, None, torch.irfft(Fmv, spatial_dim, normalized=True,
                 signal_sizes=sh[2:])
 
 
@@ -62,12 +61,9 @@ class FluidMetric(object):
                     2.*(1.-np.cos(2*np.pi*np.arange(Nf)/N))).type(dtype).to(device))
                 self.luts['sin'].append(torch.Tensor(
                     np.sin(2.*np.pi*np.arange(Nf)/N)).type(dtype).to(device))
-    def operator(self, mv, inverse, cutoffs=0):
-        if isinstance(cutoffs, int):
-            cutoffs = [cutoffs]*(len(mv.shape)-2)
+    def operator(self, mv, inverse):
         self.initialize_luts(shape=mv.shape, dtype=mv.dtype, device=mv.device)
-        return FluidMetricOperator.apply(self.params, self.luts, inverse,
-                cutoffs, mv)
+        return FluidMetricOperator.apply(self.params, self.luts, inverse, mv)
     def sharp(self, m):
         """
         Raise indices, meaning convert a momentum (covector field) to a velocity
