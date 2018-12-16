@@ -88,6 +88,16 @@ def test_affine_inverse(bs, dim):
 
 @pytest.mark.parametrize("bs", batch_sizes)
 @pytest.mark.parametrize("dim", dims)
+@pytest.mark.parametrize("disp", TF)
+def test_regrid_identity(bs, dim, disp):
+    imsh = tuple([bs,dim]+[res]*dim)
+    I = torch.randn(imsh, dtype=torch.float64, requires_grad=True).cuda()
+    outshape = imsh[2:]
+    Ir = lm.regrid(I, shape=outshape, displacement=disp)
+    assert torch.allclose(I, Ir), "Failed regrid identity check"
+
+@pytest.mark.parametrize("bs", batch_sizes)
+@pytest.mark.parametrize("dim", dims)
 @pytest.mark.parametrize("c", channels)
 def test_regrid_gradcheck(bs, dim, c):
     imsh = tuple([bs,c]+[res]*dim)
