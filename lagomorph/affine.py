@@ -139,7 +139,8 @@ class RegridFunction(torch.autograd.Function):
             if I.shape[1] != dim:
                 raise ValueError("Incorrect num channels for regridding displacement")
             ctx.spacing_tensor = 1./torch.Tensor(spacing).type(reg.type()).to(reg.device).view(1,dim,*[1]*dim)
-            reg = reg * ctx.spacing_tensor
+            #reg = reg * ctx.spacing_tensor
+            reg.mul_(ctx.spacing_tensor)
         return reg
     @staticmethod
     def backward(ctx, grad_out):
@@ -150,7 +151,7 @@ class RegridFunction(torch.autograd.Function):
             ctx.outorigin,
             ctx.outspacing)
         if ctx.displacement:
-            d_I = d_I * ctx.spacing_tensor
+            d_I.mul_(ctx.spacing_tensor)
         return d_I, None, None, None, None
 def regrid(I, shape=None, origin=None, spacing=None, displacement=False):
     """Interpolate from one regular grid to another.

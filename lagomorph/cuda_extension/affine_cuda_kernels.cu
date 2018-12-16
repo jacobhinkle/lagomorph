@@ -610,8 +610,8 @@ __global__ void regrid_forward_kernel_2d(
         Real* __restrict__ out,
         const Real* __restrict__ I,
         int Nx, int Ny,
-        double Ox, double Oy,
-        double Sx, double Sy,
+        Real Ox, Real Oy,
+        Real Sx, Real Sy,
         size_t nn, size_t nc, size_t nx, size_t ny) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
@@ -642,8 +642,8 @@ __global__ void regrid_forward_kernel_3d(
         Real* __restrict__ out,
         const Real* __restrict__ I,
         int Nx, int Ny, int Nz,
-        double Ox, double Oy, double Oz,
-        double Sx, double Sy, double Sz,
+        Real Ox, Real Oy, Real Oz,
+        Real Sx, Real Sy, Real Sz,
         size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
@@ -656,12 +656,12 @@ __global__ void regrid_forward_kernel_3d(
     Real ox = .5*static_cast<Real>(Nx-1);
     Real oy = .5*static_cast<Real>(Ny-1);
     Real oz = .5*static_cast<Real>(Nz-1);
-    auto hx = (i-ox)*Sx + Ox;
-    auto hy = (j-oy)*Sy + Oy;
+    Real hx = (i-ox)*Sx + Ox;
+    Real hy = (j-oy)*Sy + Oy;
     for (int n=0; n < nn; ++n) {
         for (int c=0; c < nc; ++c) {
             for (int k=0; k < Nz; ++k) {
-                auto hz = (k-oz)*Sz + Oz;
+                Real hz = (k-oz)*Sz + Oz;
                 auto Inx = triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
                     hx, hy, hz,
                     nx, ny, nz);
@@ -730,8 +730,8 @@ __global__ void regrid_backward_kernel_2d(
         Real* __restrict__ d_I,
         const Real* __restrict__ grad_out,
         size_t Nx, size_t Ny,
-        double Ox, double Oy,
-        double Sx, double Sy,
+        Real Ox, Real Oy,
+        Real Sx, Real Sy,
         size_t nn, size_t nc, size_t nx, size_t ny) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
@@ -760,8 +760,8 @@ __global__ void regrid_backward_kernel_3d(
         Real* __restrict__ d_I,
         const Real* __restrict__ grad_out,
         size_t Nx, size_t Ny, size_t Nz,
-        double Ox, double Oy, double Oz,
-        double Sx, double Sy, double Sz,
+        Real Ox, Real Oy, Real Oz,
+        Real Sx, Real Sy, Real Sz,
         size_t nn, size_t nc, size_t nx, size_t ny, size_t nz) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
