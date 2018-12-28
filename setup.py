@@ -3,7 +3,7 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
     name="lagomorph",
-    version="1.0.1",
+    version="1.0.2",
     author='Jacob Hinkle',
     author_email='jacob.hinkle@gmail.com',
     url='https://github.com/jacobhinkle/lagomorph',
@@ -19,11 +19,6 @@ setup(
             'lagomorph/cuda_extension/diff_cuda_kernels.cu',
             'lagomorph/cuda_extension/interp_cuda_kernels.cu',
             'lagomorph/cuda_extension/metric_cuda_kernels.cu',
-            'lagomorph/cuda_extension/atomic.cuh',
-            'lagomorph/cuda_extension/defs.cuh',
-            'lagomorph/cuda_extension/diff.cuh',
-            'lagomorph/cuda_extension/extrap.cuh',
-            'lagomorph/cuda_extension/interp.cuh',
             'lagomorph/cuda_extension/cuda_extension.cpp'
         ],
         include_dirs=["lagomorph/cuda_extension"])]

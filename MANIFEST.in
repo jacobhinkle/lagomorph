@@ -1,0 +1,5 @@
+include lagomorph/cuda_extension/atomic.cuh
+include lagomorph/cuda_extension/defs.cuh
+include lagomorph/cuda_extension/diff.cuh
+include lagomorph/cuda_extension/extrap.cuh
+include lagomorph/cuda_extension/interp.cuh
