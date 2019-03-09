@@ -3,12 +3,12 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
     name="lagomorph",
-    version="1.0.2",
+    version="1.0.3",
     author='Jacob Hinkle',
     author_email='jacob.hinkle@gmail.com',
     url='https://github.com/jacobhinkle/lagomorph',
     keywords='medical-imaging computation-anatomy image-registration computer-vision pytorch cuda',
-    packages=['lagomorph'],
+    packages=['lagomorph','lagomorph.affine','lagomorph.data'],
     python_requires=">=3.6",
     setup_requires=['pytest-runner'],
     install_requires=['torch>=0.4.0','numpy'],

@@ -1,7 +1,26 @@
 import torch
+from torch.nn.functional import mse_loss
 import numpy as np
+from ..utils import tqdm
 import lagomorph_cuda
 import math, ctypes
+
+
+def batch_average(dataloader, **kwargs):
+    """Compute the average using streaming batches from a dataloader along a given dimension"""
+    avg = None
+    sumsizes = 0
+    for (i, img) in tqdm(dataloader, 'image avg'):
+        sz = img.shape[0]
+        avi = img.to('cuda').mean(**kwargs)
+        if avg is None:
+            avg = avi
+        else:
+            # add similar-sized numbers using this running average
+            avg = avg*(sumsizes/(sumsizes+sz)) + avi*(sz/(sumsizes+sz))
+        sumsizes += sz
+    return avg
+
 
 class AffineInterpFunction(torch.autograd.Function):
     """Interpolate an image using an affine transformation, parametrized by a
@@ -246,3 +265,138 @@ class RegridModule(torch.nn.Module):
         self.spacing = spacing
     def forward(self, I):
         return regrid(I, self.shape, self.origin, self.spacing)
+
+def affine_atlas(dataset,
+                 As,
+                 Ts,
+                I=None,
+                num_epochs=1000,
+                batch_size=50,
+                image_update_freq=0,
+                affine_steps=1,
+                reg_weightA=0e1,
+                reg_weightT=0e1,
+                learning_rate_A=1e-3,
+                learning_rate_T=1e-2,
+                learning_rate_I=1e5,
+                loader_workers=8,
+                gpu=None,
+                world_size=1,
+                rank=0):
+    def L2norm(a):
+        aflat = a.view(-1)
+        return torch.dot(aflat, aflat)
+    from torch.utils.data import DataLoader
+    if world_size > 1:
+        sampler = DistributedSampler(dataset, 
+                num_replicas=world_size,
+                rank=rank)
+    else:
+        sampler = None
+    if gpu is None:
+        device = 'cpu'
+    else:
+        device = f'cuda:{gpu}'
+    dataloader = DataLoader(dataset, batch_size=batch_size, sampler=sampler,
+                            shuffle=False, num_workers=8, pin_memory=True)
+    if I is None:
+        # initialize base image to mean
+        I = batch_average(dataloader, dim=0)
+    else:
+        I = I.clone()
+    I = I.to(device).view(1,1,*I.squeeze().shape)
+    image_optimizer = torch.optim.SGD([I],
+                                      lr=learning_rate_I,
+                                      weight_decay=0.)
+    dim = I.dim() - 2
+    eye = torch.eye(dim).view(1,dim,dim).type(I.dtype).to(I.device)
+    losses = []
+    iter_losses = []
+    epbar = range(num_epochs)
+    if rank == 0:
+        epbar = tqdm(epbar, desc='epoch')
+    for epoch in epbar:
+        epoch_loss = 0.0
+        itbar = dataloader
+        if rank == 0:
+            itbar = tqdm(dataloader, desc='iter')
+        if image_update_freq == 0 or epoch == 0:
+            image_optimizer.zero_grad()
+        image_iters = 0 # how many iters accumulated
+        for it, (ix, img) in enumerate(itbar):
+            A = As[ix,...].detach().to(device).contiguous()
+            T = Ts[ix,...].detach().to(device).contiguous()
+            img = img.to(device)
+            img.requires_grad_(False)
+            for affit in range(affine_steps):
+                A.requires_grad_(True)
+                T.requires_grad_(True)
+                if A.grad is not None:
+                    A.grad.detach_()
+                    A.grad.zero_()
+                if T.grad is not None:
+                    T.grad.detach_()
+                    T.grad.zero_()
+                # only accumulate image gradient at last affine step
+                I.requires_grad_(affit == affine_steps-1)
+                Idef = affine_interp(I, A+eye, T)
+                regloss = 0
+                if reg_weightA > 0:
+                    regtermA = L2norm(A)
+                    regloss = regloss + .5*reg_weightA*regtermA
+                if reg_weightT > 0:
+                    regtermT = L2norm(T)
+                    regloss = regloss + .5*reg_weightT*regtermT
+                loss = (mse_loss(Idef, img, reduction='sum')*(1./np.prod(I.shape[2:])) + regloss) \
+                        / (img.shape[0])
+                loss.backward()
+                loss.detach_()
+                iter_losses.append(loss)
+                with torch.no_grad():
+                    li = (loss*(img.shape[0]/len(dataloader.dataset))).detach()
+                    iter_losses.append(li.item())
+                    A.add_(-learning_rate_A, A.grad)
+                    T.add_(-learning_rate_T, T.grad)
+            image_iters += 1
+            if image_iters == image_update_freq:
+                with torch.no_grad():
+                    if world_size > 1:
+                        all_reduce(epoch_loss)
+                        all_reduce(I.grad)
+                        I.grad = I.grad/(image_iters*world_size)
+                image_optimizer.step()
+                image_iters = 0
+            with torch.no_grad():
+                li = (loss*(img.shape[0]/len(dataloader.dataset))).detach()
+                epoch_loss = epoch_loss + li
+            #itbar.set_postfix(minibatch_loss=itloss)
+            As[ix,...] = A.detach().to(As.device)
+            Ts[ix,...] = T.detach().to(Ts.device)
+        with torch.no_grad():
+            if world_size > 1:
+                all_reduce(epoch_loss)
+                all_reduce(I.grad)
+                I.grad = I.grad/(image_iters*world_size)
+        image_optimizer.step()
+        losses.append(epoch_loss.item())
+        if rank == 0: epbar.set_postfix(epoch_loss=epoch_loss.item())
+    return I.detach(), As, Ts, losses, iter_losses
+
+
+class StandardizedDataset():
+    def __init__(self, dataset, As, Ts, device='cuda'):
+        self.dataset = dataset
+        self.As = As
+        self.Ts = Ts
+        self.device = device
+        dim = Ts.shape[1]
+        self.eye = torch.eye(dim).view(1,dim,dim).type(As.dtype).to(device)
+    def __len__(self):
+        return len(self.dataset)
+    def __getitem__(self, idx):
+        J = self.dataset[idx]
+        J = J.to(self.device).unsqueeze(0)
+        A = self.As[[idx],...].to(self.device)
+        T = self.Ts[[idx],...].to(self.device)
+        Ainv, Tinv = affine_inverse(A+self.eye, T)
+        return affine_interp(J, Ainv, Tinv).squeeze(0)
