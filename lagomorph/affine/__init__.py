@@ -6,20 +6,31 @@ import lagomorph_cuda
 import math, ctypes
 
 
-def batch_average(dataloader, **kwargs):
+def batch_average(dataloader, dim=0, returns_indices=False):
     """Compute the average using streaming batches from a dataloader along a given dimension"""
     avg = None
+    dtype = None
     sumsizes = 0
-    for (i, img) in tqdm(dataloader, 'image avg'):
-        sz = img.shape[0]
-        avi = img.to('cuda').mean(**kwargs)
-        if avg is None:
-            avg = avi
-        else:
-            # add similar-sized numbers using this running average
-            avg = avg*(sumsizes/(sumsizes+sz)) + avi*(sz/(sumsizes+sz))
-        sumsizes += sz
-    return avg
+    comp = 0.0 # Kahan sum compensation
+    with torch.no_grad():
+        for img in tqdm(dataloader, 'image avg'):
+            if returns_indices:
+                _, img = img
+            sz = img.shape[dim]
+            if dtype is None:
+                dtype = img.dtype
+            # compute averages in float64
+            avi = img.type(torch.float64).sum(dim=0)
+            if avg is None:
+                avg = avi
+            else:
+                # add similar-sized numbers using this running average
+                avg = avg*(sumsizes/(sumsizes+sz)) + avi/(sumsizes+sz)
+            sumsizes += sz
+        if dtype in [torch.float32, torch.float64]:
+            # if original data in float format, return in same dtype
+            avg = avg.type(dtype)
+        return avg
 
 
 class AffineInterpFunction(torch.autograd.Function):
@@ -93,7 +104,7 @@ def invert_3x3(A):
 
 def affine_inverse(A, T):
     """Invert an affine transformation.
-    
+
     A transformation (A,T) is inverted by computing (A^{-1}, -A^{-1} T)
     """
     assert A.shape[1] == A.shape[2]
@@ -283,9 +294,7 @@ def affine_atlas(dataset,
                 gpu=None,
                 world_size=1,
                 rank=0):
-    def L2norm(a):
-        aflat = a.view(-1)
-        return torch.dot(aflat, aflat)
+    L2 = lambda a,b: torch.dot(a.view(-1), b.view(-1))
     from torch.utils.data import DataLoader
     if world_size > 1:
         sampler = DistributedSampler(dataset, 
@@ -298,10 +307,11 @@ def affine_atlas(dataset,
     else:
         device = f'cuda:{gpu}'
     dataloader = DataLoader(dataset, batch_size=batch_size, sampler=sampler,
-                            shuffle=False, num_workers=8, pin_memory=True)
+                            shuffle=False, num_workers=loader_workers,
+                            pin_memory=True, drop_last=False)
     if I is None:
         # initialize base image to mean
-        I = batch_average(dataloader, dim=0)
+        I = batch_average(dataloader, dim=0, returns_indices=True)
     else:
         I = I.clone()
     I = I.to(device).view(1,1,*I.squeeze().shape)
@@ -310,7 +320,7 @@ def affine_atlas(dataset,
                                       weight_decay=0.)
     dim = I.dim() - 2
     eye = torch.eye(dim).view(1,dim,dim).type(I.dtype).to(I.device)
-    losses = []
+    epoch_losses = []
     iter_losses = []
     epbar = range(num_epochs)
     if rank == 0:
@@ -340,18 +350,17 @@ def affine_atlas(dataset,
                 # only accumulate image gradient at last affine step
                 I.requires_grad_(affit == affine_steps-1)
                 Idef = affine_interp(I, A+eye, T)
-                regloss = 0
+                regloss = 0.0
                 if reg_weightA > 0:
-                    regtermA = L2norm(A)
+                    regtermA = L2(A,A)
                     regloss = regloss + .5*reg_weightA*regtermA
                 if reg_weightT > 0:
-                    regtermT = L2norm(T)
+                    regtermT = L2(T,T)
                     regloss = regloss + .5*reg_weightT*regtermT
                 loss = (mse_loss(Idef, img, reduction='sum')*(1./np.prod(I.shape[2:])) + regloss) \
                         / (img.shape[0])
                 loss.backward()
                 loss.detach_()
-                iter_losses.append(loss)
                 with torch.no_grad():
                     li = (loss*(img.shape[0]/len(dataloader.dataset))).detach()
                     iter_losses.append(li.item())
@@ -363,8 +372,9 @@ def affine_atlas(dataset,
                     if world_size > 1:
                         all_reduce(epoch_loss)
                         all_reduce(I.grad)
-                        I.grad = I.grad/(image_iters*world_size)
+                    I.grad = I.grad/(image_iters*world_size)
                 image_optimizer.step()
+                image_optimizer.zero_grad()
                 image_iters = 0
             with torch.no_grad():
                 li = (loss*(img.shape[0]/len(dataloader.dataset))).detach()
@@ -372,15 +382,16 @@ def affine_atlas(dataset,
             #itbar.set_postfix(minibatch_loss=itloss)
             As[ix,...] = A.detach().to(As.device)
             Ts[ix,...] = T.detach().to(Ts.device)
-        with torch.no_grad():
-            if world_size > 1:
-                all_reduce(epoch_loss)
-                all_reduce(I.grad)
+        if image_iters > 0:
+            with torch.no_grad():
+                if world_size > 1:
+                    all_reduce(epoch_loss)
+                    all_reduce(I.grad)
                 I.grad = I.grad/(image_iters*world_size)
-        image_optimizer.step()
-        losses.append(epoch_loss.item())
+                image_optimizer.step()
+        epoch_losses.append(epoch_loss.item())
         if rank == 0: epbar.set_postfix(epoch_loss=epoch_loss.item())
-    return I.detach(), As, Ts, losses, iter_losses
+    return I.detach(), As.detach(), Ts.detach(), epoch_losses, iter_losses
 
 
 class StandardizedDataset():
