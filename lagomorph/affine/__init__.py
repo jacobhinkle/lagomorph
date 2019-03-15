@@ -22,7 +22,7 @@ def batch_average(dataloader, dim=0, returns_indices=False):
             # compute averages in float64
             avi = img.type(torch.float64).sum(dim=0)
             if avg is None:
-                avg = avi
+                avg = avi/sz
             else:
                 # add similar-sized numbers using this running average
                 avg = avg*(sumsizes/(sumsizes+sz)) + avi/(sumsizes+sz)
