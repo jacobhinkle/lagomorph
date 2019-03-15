@@ -314,7 +314,7 @@ def affine_atlas(dataset,
         I = batch_average(dataloader, dim=0, returns_indices=True)
     else:
         I = I.clone()
-    I = I.to(device).view(1,1,*I.squeeze().shape)
+    I = I.type(As.dtype).to(device).view(1,1,*I.squeeze().shape)
     image_optimizer = torch.optim.SGD([I],
                                       lr=learning_rate_I,
                                       weight_decay=0.)
