@@ -7,7 +7,7 @@ setup(
     author_email='jacob.hinkle@gmail.com',
     url='https://github.com/jacobhinkle/lagomorph',
     keywords='medical-imaging computation-anatomy image-registration computer-vision pytorch cuda',
-    packages=['lagomorph','lagomorph.affine','lagomorph.data'],
+    packages=['lagomorph','lagomorph.affine','lagomorph.data','lagomorph.lddmm'],
     python_requires=">=3.6",
     use_scm_version=True,
     setup_requires=['pytest-runner','setuptools_scm'],
