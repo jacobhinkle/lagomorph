@@ -8,6 +8,10 @@
 #include "atomic.cuh"
 #include "interp.cuh"
 
+#define CHECK_CUDA(x) AT_ASSERTM(x.type().is_cuda(), #x " must be a CUDA tensor")
+#define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
+#define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
+
 #define INTERP_BACKWARD_THREADS_X 16
 #define INTERP_BACKWARD_THREADS_Y 32
 const dim3 INTERP_BACKWARD_THREADS(INTERP_BACKWARD_THREADS_X,
@@ -617,6 +621,7 @@ __global__ void regrid_forward_kernel_2d(
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
     if (i >= Nx || j >= Ny) return;
     const int Nxy = Nx*Ny;
+    const int nxy = nx*ny;
     const Real* In = I;
     Real* outn = out;
     int ix = i*Ny + j;
@@ -632,7 +637,7 @@ __global__ void regrid_forward_kernel_2d(
                 nx, ny);
             outn[ix] = Inx;
             outn += Nxy;
-            In += Nxy;
+            In += nxy;
         }
     }
 }
@@ -649,6 +654,7 @@ __global__ void regrid_forward_kernel_3d(
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
     if (i >= Nx || j >= Ny) return;
     const int Nxyz = Nx*Ny*Nz;
+    const int nxyz = nx*ny*nz;
     const Real* In = I;
     Real* outn = out;
     int ix = (i*Ny + j)*Nz;
@@ -660,15 +666,16 @@ __global__ void regrid_forward_kernel_3d(
     Real hy = (j-oy)*Sy + Oy;
     for (int n=0; n < nn; ++n) {
         for (int c=0; c < nc; ++c) {
+            Real hz = Oz - oz*Sz;
             for (int k=0; k < Nz; ++k) {
-                Real hz = (k-oz)*Sz + Oz;
-                auto Inx = triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
+                //Real hz = (k-oz)*Sz + Oz;
+                outn[ix+k] = triLerp<Real, BACKGROUND_STRATEGY_CLAMP>(In,
                     hx, hy, hz,
                     nx, ny, nz);
-                outn[ix+k] = Inx;
+                hz += Sz;
             }
             outn += Nxyz;
-            In += Nxyz;
+            In += nxyz;
         }
     }
 }
@@ -679,6 +686,7 @@ at::Tensor regrid_forward(
     std::vector<double> origin,
     std::vector<double> spacing) {
     auto d = I.dim() - 2;
+    CHECK_INPUT(I)
     AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
     AT_ASSERTM(shape.size() == d, "Shape should be vector of size d (not 2+d)")
     AT_ASSERTM(origin.size() == d, "Origin should be vector of size d (not 2+d)")
@@ -737,6 +745,7 @@ __global__ void regrid_backward_kernel_2d(
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
     if (i >= Nx || j >= Ny) return;
     const int Nxy = Nx*Ny;
+    const int nxy = nx*ny;
     Real* d_In = d_I;
     const Real* gon = grad_out;
     int ix = i*Ny + j;
@@ -750,7 +759,7 @@ __global__ void regrid_backward_kernel_2d(
             atomicSplat<Real, DEFAULT_BACKGROUND_STRATEGY, false>(d_In, NULL,
                 gon[ix], hx, hy, nx, ny);
             gon += Nxy;
-            d_In += Nxy;
+            d_In += nxy;
         }
     }
 }
@@ -767,6 +776,7 @@ __global__ void regrid_backward_kernel_3d(
     const int j = blockDim.y*blockIdx.y + threadIdx.y;
     if (i >= Nx || j >= Ny) return;
     const int Nxyz = Nx*Ny*Nz;
+    const int nxyz = nx*ny*nz;
     Real* d_In = d_I;
     const Real* gon = grad_out;
     int ix = (i*Ny + j)*Nz;
@@ -784,7 +794,7 @@ __global__ void regrid_backward_kernel_3d(
                     gon[ix+k], hx, hy, hz, nx, ny, nz);
             }
             gon += Nxyz;
-            d_In += Nxyz;
+            d_In += nxyz;
         }
     }
 }
@@ -796,6 +806,7 @@ at::Tensor regrid_backward(
     std::vector<double> origin,
     std::vector<double> spacing) {
     auto d = grad_out.dim() - 2;
+    CHECK_INPUT(grad_out)
     AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
     AT_ASSERTM(inshape.size() == d, "Input shape should be vector of size d (not 2+d)")
     AT_ASSERTM(shape.size() == d, "Shape should be vector of size d (not 2+d)")
