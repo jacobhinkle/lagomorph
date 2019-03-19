@@ -1,4 +1,5 @@
 from .__init__ import *
+from ..utils import tqdm
 
 class DataCmdLine():
     # Customized from:
@@ -33,6 +34,7 @@ class DataCmdLine():
         parser.add_argument('output', type=str, help='Path to output HDF5 file')
         parser.add_argument('--h5key', default='images', help='Name of dataset in input and HDF5 files')
         parser.add_argument('--scale', default=2, type=int, help='Width of average pooling window')
+        parser.add_argument('--copy_other_keys', action='store_true', help='Copy all other keys from input file into output verbatim')
         args = parser.parse_args(sys.argv[2:])
 
         from ..data import H5Dataset, write_dataset_h5
@@ -41,4 +43,10 @@ class DataCmdLine():
         dsds = DownscaledDataset(dataset, scale=args.scale)
 
         write_dataset_h5(dsds, args.output, key=args.h5key)
+        if args.copy_other_keys:
+            with h5py.File(args.input, 'r') as fi, h5py.File(args.output, 'a') as fo:
+                for k in tqdm(fi.keys(), desc='other keys'):
+                    if k != args.h5key:
+                        fi.copy(k, fo)
+
 DataCmdLine()

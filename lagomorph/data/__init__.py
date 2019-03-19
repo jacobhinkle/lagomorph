@@ -64,6 +64,8 @@ class DownscaledDataset(Dataset):
     def __getitem__(self, idx):
         J = self.dataset[idx]
         J = J.to(self.device)
+        if J.dtype not in [torch.float32, torch.float64]:
+            J = J.type(torch.float32)
         if J.dim() == 4:
             J = F.avg_pool3d(J, self.scale)
         elif J.dim() == 3:
