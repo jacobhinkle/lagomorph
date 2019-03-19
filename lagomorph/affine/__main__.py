@@ -131,6 +131,7 @@ class AffineCmdLine():
         parser.add_argument('atlasoutput', type=str, help='Path to HDF5 output from affine atlas building')
         parser.add_argument('standardizedoutput', type=str, help='Path to output HDF5 file')
         parser.add_argument('--h5key', '-k', default='images', help='Name of dataset in input and HDF5 files')
+        parser.add_argument('--copy_other_keys', action='store_true', help='Copy all other keys from input file into output verbatim')
         parser.add_argument('--rescale', default=None, type=float, help='Amount by which to rescale translations. Default: automatic')
         args = parser.parse_args(sys.argv[2:])
 
@@ -153,10 +154,17 @@ class AffineCmdLine():
                     for sn,sa in zip(shnew,shatlas):
                         if sn != args.rescale * sa:
                             raise Exception("Unclear how to rescale translations. You must pass the --rescale argument directly.")
+                else:
+                    args.rescale = 1.0
         Ts *= args.rescale
 
         std_ds = StandardizedDataset(dataset, As, Ts)
         write_dataset_h5(std_ds, args.standardizedoutput, key=args.h5key)
-        with h5py.File(std_ds, 'a') as fw:
-            self._stamp_dataset(std_ds[args.h5key])
+        with h5py.File(args.standardizedoutput, 'a') as fw:
+            self._stamp_dataset(fw[args.h5key], args)
+        if args.copy_other_keys:
+            with h5py.File(args.inputimages, 'r') as fi, h5py.File(args.standardizedoutput, 'a') as fo:
+                for k in tqdm(fi.keys(), desc='other keys'):
+                    if k != args.h5key:
+                        fi.copy(k, fo)
 AffineCmdLine()

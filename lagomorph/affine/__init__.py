@@ -296,6 +296,7 @@ def affine_atlas(dataset,
                 rank=0):
     L2 = lambda a,b: torch.dot(a.view(-1), b.view(-1))
     from torch.utils.data import DataLoader
+    from torch.utils.data.distributed import DistributedSampler
     if world_size > 1:
         sampler = DistributedSampler(dataset, 
                 num_replicas=world_size,
@@ -410,4 +411,6 @@ class StandardizedDataset():
         A = self.As[[idx],...].to(self.device)
         T = self.Ts[[idx],...].to(self.device)
         Ainv, Tinv = affine_inverse(A+self.eye, T)
+        if J.dtype not in [torch.float32, torch.float64]:
+            J = J.type(torch.float32)
         return affine_interp(J, Ainv, Tinv).squeeze(0)
