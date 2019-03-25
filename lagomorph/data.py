@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 import h5py
+from .utils import tqdm, Tool
 
 class H5Dataset(Dataset):
     """
@@ -72,6 +73,32 @@ class DownscaledDataset(Dataset):
             J = F.avg_pool2d(J, self.scale)
         return J
 
+def batch_average(dataloader, dim=0, returns_indices=False):
+    """Compute the average using streaming batches from a dataloader along a given dimension"""
+    avg = None
+    dtype = None
+    sumsizes = 0
+    comp = 0.0 # Kahan sum compensation
+    with torch.no_grad():
+        for img in tqdm(dataloader, 'image avg'):
+            if returns_indices:
+                _, img = img
+            sz = img.shape[dim]
+            if dtype is None:
+                dtype = img.dtype
+            # compute averages in float64
+            avi = img.type(torch.float64).sum(dim=0)
+            if avg is None:
+                avg = avi/sz
+            else:
+                # add similar-sized numbers using this running average
+                avg = avg*(sumsizes/(sumsizes+sz)) + avi/(sumsizes+sz)
+            sumsizes += sz
+        if dtype in [torch.float32, torch.float64]:
+            # if original data in float format, return in same dtype
+            avg = avg.type(dtype)
+        return avg
+
 
 def write_dataset_h5(dataset, h5path, key='images'):
     """
@@ -84,7 +111,7 @@ def write_dataset_h5(dataset, h5path, key='images'):
     that the names of the extra members of the tuple can be overridden with the
     argument 'extra_keys'.
     """
-    from ..utils import tqdm
+    from .utils import tqdm
     if not isinstance(key, tuple):
         # make key a tuple if it's not already
         key = (key,)
@@ -111,4 +138,54 @@ def write_dataset_h5(dataset, h5path, key='images'):
                 if isinstance(I, torch.Tensor):
                     I = I.cpu().numpy()
                 dsi[i,...] = I
+
+class _Tool(Tool):
+    """Generic dataset utilities not specific to one class of registration methods"""
+    module_name = "lagomorph data"
+    subcommands = ["average", "downscale"]
+    def average(self):
+        """Average a dataset inside an HDF5 file in the first dimension"""
+        import argparse, sys
+        parser = self.new_parser('average')
+        # prefixing the argument with -- means it's optional
+        parser.add_argument('input', type=str, help='Path to input image HDF5 file')
+        parser.add_argument('output', type=str, help='Path to output HDF5 file')
+        parser.add_argument('--h5key', default='images', help='Name of dataset in input HDF5 file')
+        parser.add_argument('--output_h5key', default='average_image', help='Name of dataset in output HDF5 file')
+        parser.add_argument('--loader_workers', default=8, type=int, help='Number of concurrent workers for dataloader')
+        parser.add_argument('--batch_size', default=50, type=int, help='Batch size')
+        args = parser.parse_args(sys.argv[2:])
+
+        dataset = H5Dataset(args.input, key=args.h5key, return_indices=False)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size,
+                                shuffle=False, num_workers=args.loader_workers,
+                                pin_memory=True, drop_last=False)
+        Iav = batch_average(dataloader, returns_indices=False)
+        with h5py.File(args.output,'w') as f:
+            ds = f.create_dataset(args.output_h5key, data=Iav.unsqueeze(0))
+            self._stamp_dataset(ds, args)
+    def downscale(self):
+        """Downscale an image dataset using average pooling"""
+        import argparse, sys
+        parser = self.new_parser('downscale')
+        # prefixing the argument with -- means it's optional
+        parser.add_argument('input', type=str, help='Path to input image HDF5 file')
+        parser.add_argument('output', type=str, help='Path to output HDF5 file')
+        parser.add_argument('--h5key', default='images', help='Name of dataset in input and HDF5 files')
+        parser.add_argument('--scale', default=2, type=int, help='Width of average pooling window')
+        parser.add_argument('--copy_other_keys', action='store_true', help='Copy all other keys from input file into output verbatim')
+        args = parser.parse_args(sys.argv[2:])
+
+        dataset = H5Dataset(args.input, key=args.h5key)
+
+        dsds = DownscaledDataset(dataset, scale=args.scale)
+
+        write_dataset_h5(dsds, args.output, key=args.h5key)
+        with h5py.File(args.output, 'a') as f:
+            self._stamp_dataset(f[args.h5key], args)
+        if args.copy_other_keys:
+            with h5py.File(args.input, 'r') as fi, h5py.File(args.output, 'a') as fo:
+                for k in tqdm(fi.keys(), desc='other keys'):
+                    if k != args.h5key:
+                        fi.copy(k, fo)
 

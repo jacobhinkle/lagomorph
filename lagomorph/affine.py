@@ -1,36 +1,10 @@
 import torch
 from torch.nn.functional import mse_loss
 import numpy as np
-from ..utils import tqdm
+from .utils import tqdm, Tool
+from .data import batch_average
 import lagomorph_cuda
 import math, ctypes
-
-
-def batch_average(dataloader, dim=0, returns_indices=False):
-    """Compute the average using streaming batches from a dataloader along a given dimension"""
-    avg = None
-    dtype = None
-    sumsizes = 0
-    comp = 0.0 # Kahan sum compensation
-    with torch.no_grad():
-        for img in tqdm(dataloader, 'image avg'):
-            if returns_indices:
-                _, img = img
-            sz = img.shape[dim]
-            if dtype is None:
-                dtype = img.dtype
-            # compute averages in float64
-            avi = img.type(torch.float64).sum(dim=0)
-            if avg is None:
-                avg = avi/sz
-            else:
-                # add similar-sized numbers using this running average
-                avg = avg*(sumsizes/(sumsizes+sz)) + avi/(sumsizes+sz)
-            sumsizes += sz
-        if dtype in [torch.float32, torch.float64]:
-            # if original data in float format, return in same dtype
-            avg = avg.type(dtype)
-        return avg
 
 
 class AffineInterpFunction(torch.autograd.Function):
@@ -414,3 +388,146 @@ class StandardizedDataset():
         if J.dtype not in [torch.float32, torch.float64]:
             J = J.type(torch.float32)
         return affine_interp(J, Ainv, Tinv).squeeze(0)
+
+class _Tool(Tool):
+    """Affine registration methods"""
+    module_name = 'lagomorph affine'
+    subcommands = ['atlas','standardize']
+    def atlas(self):
+        """
+        Build affine atlas from HDF5 image dataset.
+
+        This command will result in a new HDF5 file containing the following datasets:
+            atlas: the atlas image
+            A: d-by-d transformation matrices for each input image
+            T: translation vectors for each input image
+            epoch_losses: mean squared error + regularization terms averaged across epochs (this is just an average of the iteration losses per epoch)
+            iter_losses: loss at each iteration
+
+        Note that metadata like the lagomorph version and parameters this
+        command was invoked with are attached to the 'atlas' dataset as
+        attributes.
+        """
+        import argparse, sys
+        parser = self.new_parser('atlas')
+        # prefixing the argument with -- means it's optional
+        dg = parser.add_argument_group('data parameters')
+        dg.add_argument('input', type=str, help='Path to input image HDF5 file')
+        dg.add_argument('--force_dim', default=None, type=int, help='Force dimension of images instead of determining based on dataset shape')
+        dg.add_argument('--h5key', '-k', default='images', help='Name of dataset in input HDF5 file')
+        dg.add_argument('--loader_workers', default=8, help='Number of concurrent workers for dataloader')
+        dg.add_argument('output', type=str, help='Path to output HDF5 file')
+
+        ag = parser.add_argument_group('algorithm parameters')
+        ag.add_argument('--num_epochs', default=1000, type=int, help='Number of epochs')
+        ag.add_argument('--batch_size', default=50, type=int, help='Batch size')
+        ag.add_argument('--image_update_freq', default=0, type=int, help='Update base image every N iterations. 0 for once per epoch')
+        ag.add_argument('--affine_steps', default=1, type=int, help='Affine gradient steps to take each iteration')
+        ag.add_argument('--reg_weight_A', default=1e-1, type=float, help='Amount of regularization for matrix A')
+        ag.add_argument('--reg_weight_T', default=1e-1, type=float, help='Amount of regularization for vector T')
+        ag.add_argument('--learning_rate_A', default=1e-3, type=float, help='Learning rate for matrix A')
+        ag.add_argument('--learning_rate_T', default=1e-2, type=float, help='Learning rate for vector T')
+        ag.add_argument('--learning_rate_I', default=1e4, type=float, help='Learning rate for atlas image')
+
+        self._compute_args(parser)
+        args = parser.parse_args(sys.argv[2:])
+
+        if args.gpu == 'local_rank':
+            args.gpu = args.local_rank
+        else:
+            args.gpu = int(args.gpu)
+
+        torch.cuda.set_device(args.local_rank)
+
+        if args.world_size > 1:
+            torch.distributed.init_process_group(backend='nccl',
+                    world_size=args.world_size, init_method='env://')
+
+        from .data import H5Dataset
+        dataset = H5Dataset(args.input, key=args.h5key, return_indices=True,
+                force_dim=args.force_dim)
+
+        # initialize affine transforms on CPU for entire dataset
+        n = len(dataset)
+        ds0 = dataset[0][1]
+        dim = ds0.dim()-1
+        del ds0
+        As = torch.zeros((n, dim, dim), dtype=torch.float32)
+        Ts = torch.zeros((n, dim), dtype=torch.float32)
+
+        I, As, Ts, epoch_losses, iter_losses = affine_atlas(dataset,
+                As=As,
+                Ts=Ts,
+                num_epochs=args.num_epochs,
+                batch_size=args.batch_size,
+                affine_steps=args.affine_steps,
+                image_update_freq=args.image_update_freq,
+                reg_weightA=args.reg_weight_A,
+                reg_weightT=args.reg_weight_T,
+                learning_rate_A=args.learning_rate_A,
+                learning_rate_T=args.learning_rate_T,
+                learning_rate_I=args.learning_rate_I,
+                loader_workers=args.loader_workers,
+                world_size=args.world_size,
+                rank=args.rank,
+                gpu=args.gpu)
+
+        import h5py
+        with h5py.File(args.output, 'w') as f:
+            atds = f.create_dataset('atlas', data=I.cpu().numpy())
+            self._stamp_dataset(atds, args)
+            f.create_dataset('A', data=As.cpu().numpy())
+            f.create_dataset('T', data=Ts.cpu().numpy())
+            f.create_dataset('epoch_losses', data=np.asarray(epoch_losses))
+            f.create_dataset('iter_losses', data=np.asarray(iter_losses))
+    def standardize(self):
+        """
+        Standardize a dataset using transforms found during atlas building.
+
+        Note that metadata like the lagomorph version and parameters this
+        command was invoked with are attached to the output dataset
+        (corresponding to the '--h5key') as attributes.
+        """
+        import argparse, sys
+        parser = self.new_parser('standardize')
+        # prefixing the argument with -- means it's optional
+        parser.add_argument('inputimages', type=str, help='Path to input image HDF5 file')
+        parser.add_argument('atlasoutput', type=str, help='Path to HDF5 output from affine atlas building')
+        parser.add_argument('standardizedoutput', type=str, help='Path to output HDF5 file')
+        parser.add_argument('--h5key', '-k', default='images', help='Name of dataset in input and HDF5 files')
+        parser.add_argument('--copy_other_keys', action='store_true', help='Copy all other keys from input file into output verbatim')
+        parser.add_argument('--rescale', default=None, type=float, help='Amount by which to rescale translations. Default: automatic')
+        args = parser.parse_args(sys.argv[2:])
+
+        from .data import H5Dataset, write_dataset_h5
+        dataset = H5Dataset(args.inputimages, key=args.h5key)
+
+        import h5py
+        with h5py.File(args.atlasoutput, 'r') as f:
+            As = torch.Tensor(f['A'])
+            Ts = torch.Tensor(f['T'])
+            if args.rescale is None:
+                # compare size of atlas to size of dataset to be standardized
+                # this determines the degree to which we scale T to compensate for
+                # differences in resolution
+                d = Ts.shape[1]
+                shnew = dataset[0].shape[-d:]
+                shatlas = f['atlas'].shape[-d:]
+                if shnew != shatlas:
+                    args.rescale = shnew[0] / shatlas[0]
+                    for sn,sa in zip(shnew,shatlas):
+                        if sn != args.rescale * sa:
+                            raise Exception("Unclear how to rescale translations. You must pass the --rescale argument directly.")
+                else:
+                    args.rescale = 1.0
+        Ts *= args.rescale
+
+        std_ds = StandardizedDataset(dataset, As, Ts)
+        write_dataset_h5(std_ds, args.standardizedoutput, key=args.h5key)
+        with h5py.File(args.standardizedoutput, 'a') as fw:
+            self._stamp_dataset(fw[args.h5key], args)
+        if args.copy_other_keys:
+            with h5py.File(args.inputimages, 'r') as fi, h5py.File(args.standardizedoutput, 'a') as fo:
+                for k in tqdm(fi.keys(), desc='other keys'):
+                    if k != args.h5key:
+                        fi.copy(k, fo)
