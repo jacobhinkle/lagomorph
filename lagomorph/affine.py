@@ -311,7 +311,7 @@ def affine_atlas(dataset,
         for it, (ix, img) in enumerate(itbar):
             A = As[ix,...].detach().to(device).contiguous()
             T = Ts[ix,...].detach().to(device).contiguous()
-            img = img.to(device)
+            img = img.type(As.dtype).to(device)
             img.requires_grad_(False)
             for affit in range(affine_steps):
                 A.requires_grad_(True)

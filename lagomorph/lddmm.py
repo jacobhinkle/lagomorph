@@ -243,6 +243,7 @@ class LDDMMAtlasBuilder:
         for lit in range(self.lddmm_steps):
             self.I.requires_grad_(lit == self.lddmm_steps - 1)
             m, loss, reg_term = self.lddmm_step(m, img)
+        self.ms[ix,...] = m.to(self.ms.device)
         self.image_iters += 1
         self.update_base_image()
         return loss, reg_term
@@ -276,7 +277,6 @@ class LDDMMAtlasBuilder:
             if self.rank == 0:
                 epbar.set_postfix(epoch_loss=epoch_loss,
                         epoch_reg=epoch_reg_term)
-
 
 
 class _Tool(Tool):
