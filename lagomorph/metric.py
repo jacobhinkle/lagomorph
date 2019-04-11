@@ -80,3 +80,17 @@ class FluidMetric(object):
         https://en.wikipedia.org/wiki/Musical_isomorphism
         """
         return self.operator(m, inverse=False)
+
+
+class Metric:
+    """Serialization and command line interface to a metric factory"""
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument("--metric_type", default="fluid", type=str, help="Type of parser. Currently only 'fluid' is supported.")
+        parser.add_argument("--fluid_alpha", default=.1, type=float, help="Fluid parameter for vector Laplacian term")
+        parser.add_argument("--fluid_beta", default=.0, type=float, help="Fluid parameter for gradient divergence term")
+        parser.add_argument("--fluid_gamma", default=.01, type=float, help="Fluid parameter for L2 term")
+    @classmethod
+    def from_args(cls, args):
+        if args.metric_type.lower() == 'fluid':
+            return FluidMetric(params=[args.fluid_alpha, args.fluid_beta, args.fluid_gamma])

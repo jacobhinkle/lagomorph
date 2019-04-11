@@ -10,7 +10,7 @@ import numpy as np
 from . import deform
 from . import adjrep
 from .affine import regrid
-from .metric import FluidMetric
+from .metric import FluidMetric, Metric
 from .utils import tqdm, Tool
 import math
 
@@ -108,9 +108,9 @@ class LDDMMAtlasBuilder:
             reg_weight=1e2,
             learning_rate_pose = 2e2,
             learning_rate_image = 1e4,
-            fluid_params=[0.1,0.,.01],
+            metric=None,
             momentum_shape=None,
-            momentum_preconditioning=True,
+            momentum_preconditioning=False,
             device='cuda',
             world_size=1,
             rank=0):
@@ -155,7 +155,8 @@ class LDDMMAtlasBuilder:
                                           lr=self.learning_rate_image,
                                           weight_decay=0)
     def _init_metric(self):
-        self.metric = FluidMetric(self.fluid_params)
+        if self.metric is None:
+            self.metric = FluidMetric([.1,0,.01])
     def _init_losses(self):
         # initialize losses but only if they are not preloaded
         if 'epoch_losses' not in self.__dict__:
@@ -205,6 +206,7 @@ class LDDMMAtlasBuilder:
                 all_reduce(self.I.grad)
             self.I.grad = self.I.grad/(self.image_iters*self.world_size)
             self.image_optimizer.step()
+            self.image_optimizer.zero_grad()
         self.image_iters = 0 # reset counter
     def lddmm_step(self, m, img):
         m.requires_grad_(True)
@@ -311,12 +313,16 @@ class _Tool(Tool):
         ag.add_argument('--initial_atlas', default=None, type=str, help="Path to h5 file with which to initialize image and momenta")
         ag.add_argument('--num_epochs', default=1000, type=int, help='Number of epochs')
         ag.add_argument('--batch_size', default=50, type=int, help='Batch size')
+        ag.add_argument('--precondition_momentum', action='store_true', help='Whether to precondition momentum before gradient descent by applying metric operator')
         ag.add_argument('--image_update_freq', default=0, type=int, help='Update base image every N iterations. 0 for once per epoch')
         ag.add_argument('--lddmm_steps', default=1, type=int, help='LDDMM gradient steps to take each iteration')
         ag.add_argument('--deformation_scale', default=1, type=int, help='Amount to downscale grid for LDDMM momenta/deformation')
         ag.add_argument('--reg_weight', default=1e-1, type=float, help='Amount of regularization for deformations')
         ag.add_argument('--learning_rate_m', default=1e-3, type=float, help='Learning rate for momenta')
         ag.add_argument('--learning_rate_I', default=1e5, type=float, help='Learning rate for atlas image')
+
+        mg = parser.add_argument_group('metric parameters')
+        Metric.add_args(mg)
 
         self._compute_args(parser)
         args = parser.parse_args(sys.argv[2:])
@@ -343,6 +349,8 @@ class _Tool(Tool):
         else:
             momentum_shape = None
 
+        metric = Metric.from_args(args)
+
         builder = LDDMMAtlasBuilder(dataset,
             num_epochs=args.num_epochs,
             batch_size=args.batch_size,
@@ -350,6 +358,8 @@ class _Tool(Tool):
             image_update_freq=args.image_update_freq,
             momentum_shape=momentum_shape,
             reg_weight=args.reg_weight,
+            momentum_preconditioning=args.precondition_momentum,
+            metric=metric,
             learning_rate_pose=args.learning_rate_m,
             learning_rate_image=args.learning_rate_I,
             loader_workers=args.loader_workers,
