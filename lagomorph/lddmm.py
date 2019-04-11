@@ -6,6 +6,7 @@ import torch
 from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from torch.distributed import all_reduce
 import numpy as np
 from . import deform
 from . import adjrep
@@ -147,10 +148,17 @@ class LDDMMAtlasBuilder:
     def _init_atlas_image(self):
         if self.I0 is None: # initialize base image to mean
             from .affine import batch_average
-            self.I0 = batch_average(self.dataloader, dim=0, returns_indices=True)
+            with torch.no_grad():
+                # initialize base image to mean
+                self.I0 = batch_average(self.dataloader, dim=0,
+                        returns_indices=True,
+                        progress_bar=rank==0).to(self.device)
+                if world_size > 1:
+                    all_reduce(self.I0)
+                    self.I0 /= world_size
         else:
-            self.I0 = self.I0.clone()
-        self.I = self.I0.to(self.device).view(1,1,*self.I0.squeeze().shape)
+            self.I0 = self.I0.clone().to(self.device)
+        self.I = self.I0.view(1,1,*self.I0.squeeze().shape)
         self.image_optimizer = torch.optim.SGD([self.I],
                                           lr=self.learning_rate_image,
                                           weight_decay=0)
@@ -218,26 +226,26 @@ class LDDMMAtlasBuilder:
             h = regrid(h, shape=self.I.shape[2:])
         Idef = deform.interp(self.I, h)
         v = self.metric.sharp(m)
-        reg_term = self.reg_weight*(v*m).sum()
+        reg_term = self.reg_weight*(v*m).sum()/img.numel()
         if self.regrid_momenta: # account for downscaling in averaging
             reg_term = reg_term * (self.I.numel()/v[0,0,...].numel())
-        loss = (mse_loss(Idef, img, reduction='sum') + reg_term) \
-                / (img.numel())
+        loss = mse_loss(Idef, img, reduction='sum')/img.numel() + reg_term
         loss.backward()
         # this makes it so that we can reduce the loss and eventually get
         # an accurate MSE for the entire dataset
         with torch.no_grad():
-            li = (loss*(img.shape[0]/len(self.dataloader.dataset))).detach()
-            reg_term = (reg_term*(img.shape[0]/len(self.dataloader.dataset))).detach()
+            norm_factor = (img.shape[0]/len(self.dataloader.dataset))
+            loss = (loss*norm_factor).detach()
+            reg_term = (reg_term*norm_factor).detach()
             p = m.grad
             if self.momentum_preconditioning:
                 p = self.metric.flat(p)
             m.add_(-self.learning_rate_pose, p)
             if self.world_size > 1:
-                all_reduce(li)
+                all_reduce(loss)
                 all_reduce(reg_term)
             m = m.detach()
-        return m, li.item(), reg_term.item()
+        return m, loss.item(), reg_term.item()
     def iteration(self, ix, img):
         m = self.ms[ix,...].detach()
         m = m.to(self.device)
@@ -326,17 +334,7 @@ class _Tool(Tool):
 
         self._compute_args(parser)
         args = parser.parse_args(sys.argv[2:])
-
-        if args.gpu == 'local_rank':
-            args.gpu = args.local_rank
-        else:
-            args.gpu = int(args.gpu)
-
-        torch.cuda.set_device(args.local_rank)
-
-        if args.world_size > 1:
-            torch.distributed.init_process_group(backend='nccl',
-                    world_size=args.world_size, init_method='env://')
+        self._initialize_compute(args)
 
         from .data import H5Dataset
         dataset = H5Dataset(args.input, key=args.h5key, return_indices=True,
@@ -363,9 +361,9 @@ class _Tool(Tool):
             learning_rate_pose=args.learning_rate_m,
             learning_rate_image=args.learning_rate_I,
             loader_workers=args.loader_workers,
-            world_size=args.world_size,
-            rank=args.rank,
-            device=f"cuda:{args.gpu}")
+            world_size=self.world_size,
+            rank=self.rank,
+            device=f"cuda:{self.gpu}")
 
         if args.initial_atlas is not None:
             builder.load(args.initial_atlas)

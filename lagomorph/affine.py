@@ -1,5 +1,6 @@
 import torch
 from torch.nn.functional import mse_loss
+from torch.distributed import all_reduce
 import numpy as np
 from .utils import tqdm, Tool
 from .data import batch_average
@@ -285,11 +286,16 @@ def affine_atlas(dataset,
                             shuffle=False, num_workers=loader_workers,
                             pin_memory=True, drop_last=False)
     if I is None:
-        # initialize base image to mean
-        I = batch_average(dataloader, dim=0, returns_indices=True)
+        with torch.no_grad():
+            # initialize base image to mean
+            I = batch_average(dataloader, dim=0, returns_indices=True,
+                    progress_bar=rank==0).to(device)
+            if world_size > 1:
+                all_reduce(I)
+                I /= world_size
     else:
-        I = I.clone()
-    I = I.type(As.dtype).to(device).view(1,1,*I.squeeze().shape)
+        I = I.clone().to(device)
+    I = I.type(As.dtype).view(1,1,*I.squeeze().shape)
     image_optimizer = torch.optim.SGD([I],
                                       lr=learning_rate_I,
                                       weight_decay=0.)
@@ -301,7 +307,7 @@ def affine_atlas(dataset,
     if rank == 0:
         epbar = tqdm(epbar, desc='epoch')
     for epoch in epbar:
-        epoch_loss = 0.0
+        epoch_loss = torch.Tensor([0.0])[0].to(device)
         itbar = dataloader
         if rank == 0:
             itbar = tqdm(dataloader, desc='iter')
@@ -431,17 +437,7 @@ class _Tool(Tool):
 
         self._compute_args(parser)
         args = parser.parse_args(sys.argv[2:])
-
-        if args.gpu == 'local_rank':
-            args.gpu = args.local_rank
-        else:
-            args.gpu = int(args.gpu)
-
-        torch.cuda.set_device(args.local_rank)
-
-        if args.world_size > 1:
-            torch.distributed.init_process_group(backend='nccl',
-                    world_size=args.world_size, init_method='env://')
+        self._initialize_compute(args)
 
         from .data import H5Dataset
         dataset = H5Dataset(args.input, key=args.h5key, return_indices=True,
@@ -468,9 +464,9 @@ class _Tool(Tool):
                 learning_rate_T=args.learning_rate_T,
                 learning_rate_I=args.learning_rate_I,
                 loader_workers=args.loader_workers,
-                world_size=args.world_size,
-                rank=args.rank,
-                gpu=args.gpu)
+                world_size=self.world_size,
+                rank=self.rank,
+                gpu=self.gpu)
 
         import h5py
         with h5py.File(args.output, 'w') as f:

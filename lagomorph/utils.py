@@ -26,6 +26,46 @@ if in_ipynb():
 else:
     from tqdm import tqdm
 
+def mpi_size():
+    try:
+        from mpi4py import MPI
+    except ImportError:
+        return 1
+    return MPI.COMM_WORLD.Get_size()
+
+def mpi_rank():
+    try:
+        from mpi4py import MPI
+    except ImportError:
+        return 0
+    return MPI.COMM_WORLD.Get_rank()
+
+def mpi_local_comm():
+    """Split MPI communicator based on shmem capability to produce a node-local
+    communicator.
+
+    Requires MPI implementation version >= 3
+    """
+    from mpi4py import MPI
+    return MPI.COMM_WORLD.Split_type(MPI.COMM_TYPE_SHARED)
+
+def mpi_local_rank():
+    """Computes the local rank using an MPI split communicator with type shmem.
+
+    This is the same method horovod uses to decide local rank. This
+    functionality is provided here in order to remain independent of horovod (in
+    order to use hvd.local_rank() you need to initialize and use horovod).
+    However, instead of using a custom C extension as hvd does, we use mpi4py
+    which now supports these split communicators.
+
+    Requires MPI implementation version >= 3
+    """
+    try:
+        return mpi_local_comm().Get_rank()
+    except NotImplementedError:
+        # MPI < 3, fall back to naive hostname-based method
+        print("Local rank computation not yet implemented for MPI < 3")
+        return NotImplemented
 
 class Tool:
     # Customized from:
@@ -63,10 +103,26 @@ class Tool:
     def _compute_args(parser):
         """Add common arguments for parallel commands"""
         group = parser.add_argument_group('compute parameters')
-        group.add_argument('--world_size', default=1, help='Number of NCCL ranks')
-        group.add_argument('--rank', default=0, help='NCCL rank')
-        group.add_argument('--gpu', default="local_rank", type=str, help='GPU to use, None for CPU, "local_rank" to use value of --local_rank')
-        group.add_argument('--local_rank', default=0, type=int, help='Local NCCL rank')
+        group.add_argument('--gpu', default="local_rank", type=str, help='GPU to use, None for CPU, "local_rank" to use local MPI rank')
+    def _initialize_compute(self, args):
+        """Use common compute_args to initialize torch and NCCL"""
+        self.rank = mpi_rank()
+        self.world_size = mpi_size()
+        self.local_rank = mpi_local_rank()
+
+        self.gpu = args.gpu
+        if self.gpu == 'local_rank':
+            self.gpu = self.local_rank
+        else:
+            self.gpu = int(self.gpu)
+
+        import torch
+        torch.cuda.set_device(self.gpu)
+
+        if self.world_size > 1:
+            torch.distributed.init_process_group(backend='nccl',
+                    world_size=self.world_size, rank=self.rank,
+                    init_method='env://')
     def _stamp_dataset(self, ds, args):
         from .version import __version__
         import json
