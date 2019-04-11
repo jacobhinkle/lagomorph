@@ -73,14 +73,17 @@ class DownscaledDataset(Dataset):
             J = F.avg_pool2d(J, self.scale)
         return J
 
-def batch_average(dataloader, dim=0, returns_indices=False):
+def batch_average(dataloader, dim=0, returns_indices=False, progress_bar=True):
     """Compute the average using streaming batches from a dataloader along a given dimension"""
     avg = None
     dtype = None
     sumsizes = 0
     comp = 0.0 # Kahan sum compensation
     with torch.no_grad():
-        for img in tqdm(dataloader, 'image avg'):
+        dl = dataloader
+        if progress_bar:
+            dl = tqdm(dl, 'image avg')
+        for img in dl:
             if returns_indices:
                 _, img = img
             sz = img.shape[dim]
