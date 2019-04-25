@@ -4,7 +4,7 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 setup(
     name="lagomorph",
     author='Jacob Hinkle',
-    author_email='jacob.hinkle@gmail.com',
+    author_email='hinklejd@ornl.gov',
     url='https://github.com/jacobhinkle/lagomorph',
     keywords='medical-imaging computation-anatomy image-registration computer-vision pytorch cuda',
     packages=['lagomorph'],
@@ -15,12 +15,13 @@ setup(
     tests_require=['pytest'],
     cmdclass={'build_ext': BuildExtension},
     entry_points={'console_scripts':['lagomorph=lagomorph.__main__:LagomorphTool']},
-    ext_modules=[CUDAExtension('lagomorph_cuda', [
-            'lagomorph/cuda_extension/affine_cuda_kernels.cu',
-            'lagomorph/cuda_extension/diff_cuda_kernels.cu',
-            'lagomorph/cuda_extension/interp_cuda_kernels.cu',
-            'lagomorph/cuda_extension/metric_cuda_kernels.cu',
-            'lagomorph/cuda_extension/cuda_extension.cpp'
+    ext_modules=[CUDAExtension('lagomorph_ext', [
+            'lagomorph/extension/cpu/affine.cpp',
+            'lagomorph/extension/cuda/affine.cu',
+            'lagomorph/extension/cuda/diff.cu',
+            'lagomorph/extension/cuda/interp.cu',
+            'lagomorph/extension/cuda/metric.cu',
+            'lagomorph/extension/extension.cpp'
         ],
-        include_dirs=["lagomorph/cuda_extension"])]
+        include_dirs=["lagomorph/extension/include"])]
 )

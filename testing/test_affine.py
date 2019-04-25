@@ -20,13 +20,15 @@ dims = [2,3] # which dimensions to test
 channels = [1,2,4] # numbers of channels to test
 batch_sizes = [1,2] # which batch sizes to test
 TF = [True,False]
+devices = ['cuda','cpu']
 
 @pytest.mark.parametrize("bs", batch_sizes)
 @pytest.mark.parametrize("dim", dims)
 @pytest.mark.parametrize("c", channels)
-def test_affine_interp_identity(bs, dim, c):
+@pytest.mark.parametrize("d", devices)
+def test_affine_interp_identity(d, bs, dim, c):
     imsh = tuple([bs,c]+[res]*dim)
-    I = torch.randn(imsh, dtype=torch.float64, requires_grad=False).cuda()
+    I = torch.randn(imsh, dtype=torch.float64, requires_grad=False).to(d)
     A = torch.zeros((bs,dim,dim), dtype=I.dtype, requires_grad=False).to(I.device)
     T = torch.zeros((bs,dim), dtype=I.dtype, requires_grad=False).to(I.device)
     for i in range(dim):
@@ -50,12 +52,29 @@ def test_affine_interp_gradcheck(bs, dim, c, testI, testA, testT):
     catch_gradcheck(f"Failed affine interp gradcheck with batch size {bs} dim {dim} channels {c}", lm.affine_interp, (I,A,T))
 
 @pytest.mark.parametrize("bs", batch_sizes)
+@pytest.mark.parametrize("dim", dims)
 @pytest.mark.parametrize("c", channels)
-def test_affine_2d_match_3d(bs, c):
+def test_affine_interp_gpucpu_match(bs, dim, c):
+    imsh = tuple([bs,c]+[res]*dim)
+    I = torch.randn(imsh, dtype=torch.float64).cuda()
+    A = torch.randn((bs,dim,dim), dtype=I.dtype).to(I.device)
+    T = torch.randn((bs,dim), dtype=I.dtype).to(I.device)
+    Icpu = I.to('cpu')
+    Acpu = A.to('cpu')
+    Tcpu = T.to('cpu')
+    Jcuda = lm.affine_interp(I, A, T)
+    Jcpu = lm.affine_interp(Icpu, Acpu, Tcpu)
+    assert torch.allclose(Jcuda.cpu(), Jcpu), \
+            f"Affine interp GPU-CPU mismatch with batch size {bs} dim {dim} channels {c}"
+
+@pytest.mark.parametrize("bs", batch_sizes)
+@pytest.mark.parametrize("c", channels)
+@pytest.mark.parametrize("d", devices)
+def test_affine_2d_match_3d(d, bs, c):
     """Test that 2D matches 3D affine interpolation"""
     with torch.no_grad():
         imsh = (bs,c,res,res)
-        I2 = torch.randn(imsh, dtype=torch.float64).cuda()
+        I2 = torch.randn(imsh, dtype=torch.float64).to(d)
         A2 = torch.randn((bs,2,2), dtype=torch.float64, device=I2.device)
         T2 = torch.randn((bs,2), dtype=A2.dtype, device=I2.device)
         I3 = I2.view(bs,c,res,res,1)

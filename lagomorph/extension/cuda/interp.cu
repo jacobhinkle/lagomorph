@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "atomic.cuh"
-#include "defs.cuh"
-#include "interp.cuh"
+#include "defs.h"
+#include "interp.h"
 
 // Generic interpolation kernel. Given an input image I with nc channels (this
 // could represent a vector field), interpolate the image via the displacement

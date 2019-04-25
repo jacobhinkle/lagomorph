@@ -1,11 +1,11 @@
 /* vim: set ft=cuda: */
 #pragma once
 
-#include "extrap.cuh"
-#include "defs.cuh"
+#include "extrap.h"
+#include "defs.h"
 
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__
+inline DEVICE
 Real
 diff_x(const Real* arr,
        int nx, int ny,

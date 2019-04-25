@@ -32,3 +32,9 @@ extern bool lagomorph_debug_mode;
             return __VA_ARGS__(); \
         } \
     }()
+
+#ifdef __CUDACC__
+#define DEVICE __device__
+#else
+#define DEVICE 
+#endif

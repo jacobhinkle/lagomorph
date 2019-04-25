@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "atomic.cuh"
-#include "interp.cuh"
+#include "interp.h"
 
 #define CHECK_CUDA(x) AT_ASSERTM(x.type().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")

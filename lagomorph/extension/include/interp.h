@@ -2,12 +2,12 @@
 #pragma once
 
 #include "atomic.cuh"
-#include "extrap.cuh"
-#include "defs.cuh"
+#include "extrap.h"
+#include "defs.h"
 
 // Bilerp function for single array input
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__ Real biLerp(const Real* __restrict__ img,
+inline DEVICE Real biLerp(const Real* __restrict__ img,
 	Real x, Real y,
 	size_t sizeX, size_t sizeY)
 {
@@ -57,7 +57,7 @@ inline __device__ Real biLerp(const Real* __restrict__ img,
 
 // Trilerp function for single array input
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__ Real triLerp(const Real* __restrict__ img,
+inline DEVICE Real triLerp(const Real* __restrict__ img,
 	Real x, Real y, Real z,
 	size_t sizeX, size_t sizeY, size_t sizeZ)
 {
@@ -126,7 +126,7 @@ inline __device__ Real triLerp(const Real* __restrict__ img,
 
 // Bilerp function for single array input
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__
+inline DEVICE
 void
 biLerp_grad(Real& Ix, Real& gx, Real& gy,
         const Real* __restrict__ img,
@@ -204,7 +204,7 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
 }
 
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__
+inline DEVICE
 void
 triLerp_grad(Real& Ix, Real& gx, Real& gy, Real& gz,
         const Real* __restrict__ img,
@@ -328,7 +328,7 @@ triLerp_grad(Real& Ix, Real& gx, Real& gy, Real& gz,
 
 
 template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
-inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
+inline DEVICE void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt,
         int w, int h) {
@@ -363,7 +363,7 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
 }
 
 template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
-inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
+inline DEVICE void splat_neighbor(Real* d_wd, Real* d_ww,
         Real ww, Real mass,
         int xInt, int yInt, int zInt,
         int w, int h, int l) {
@@ -401,7 +401,7 @@ inline __device__ void splat_neighbor(Real* d_wd, Real* d_ww,
 }
 
 template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
-inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
+inline  DEVICE void atomicSplat(Real* d_wd, Real* d_ww,
         Real mass, Real x, Real y,
         int w, int h)
 {
@@ -424,7 +424,7 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
     }
 }
 template<typename Real, BackgroundStrategy backgroundStrategy, bool write_weights>
-inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
+inline  DEVICE void atomicSplat(Real* d_wd, Real* d_ww,
         Real mass, Real x, Real y, Real z,
         int w, int h, int l)
 {
@@ -457,7 +457,7 @@ inline  __device__ void atomicSplat(Real* d_wd, Real* d_ww,
 // differences loss with respect to the interpolated image.
 // Note that this implementation uses global atomic adds.
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__ void interp_hessian_diagonal_image_point(
+inline DEVICE void interp_hessian_diagonal_image_point(
         Real* __restrict__ H,
         Real x, Real y,
         size_t sizeX, size_t sizeY) {

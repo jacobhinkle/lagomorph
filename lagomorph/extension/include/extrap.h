@@ -1,10 +1,10 @@
 /* vim: set ft=cuda: */
 #pragma once
 
-#include "defs.cuh"
+#include "defs.h"
 
 template<typename Real>
-__device__ Real get_value(const Real* d_i,
+DEVICE Real get_value(const Real* d_i,
                           size_t sizeX, size_t sizeY,
                           int x, int y)
 {
@@ -12,7 +12,7 @@ __device__ Real get_value(const Real* d_i,
     return d_i[index];
 }
 template<typename Real>
-inline __device__ Real get_value(const Real* d_i,
+inline DEVICE Real get_value(const Real* d_i,
                                  size_t sizeX, size_t sizeY, size_t sizeZ,
                                  int x, int y, int z)
 {
@@ -21,14 +21,14 @@ inline __device__ Real get_value(const Real* d_i,
 }
 
 // Check if the point is completely inside the boundary
-inline __device__ bool isInside(int floorX, int floorY,
+inline DEVICE bool isInside(int floorX, int floorY,
                                   int ceilX, int ceilY,
                                   int  sizeX, int  sizeY){
 
     return (floorX >= 0 && ceilX < sizeX &&
             floorY >= 0 && ceilY < sizeY);
 }
-inline __device__ bool isInside(int floorX,int floorY,int floorZ,
+inline DEVICE bool isInside(int floorX,int floorY,int floorZ,
                                   int ceilX, int ceilY, int ceilZ,
                                   int  sizeX, int  sizeY, int  sizeZ){
 
@@ -38,12 +38,12 @@ inline __device__ bool isInside(int floorX,int floorY,int floorZ,
 }
 
 // Clamp strategy
-inline __device__ void clamp(int& r, size_t b){
+inline DEVICE void clamp(int& r, size_t b){
     if (r < 0) r = 0;
     else if (r >= b) r = b - 1;
 }
 
-inline __device__ void clampBackground(int& floorX,
+inline DEVICE void clampBackground(int& floorX,
                                        int& ceilX,
                                        size_t sizeX) {
     if(floorX < 0) {
@@ -55,13 +55,13 @@ inline __device__ void clampBackground(int& floorX,
       if(floorX >= sizeX) floorX = sizeX-1;
     }
 }
-inline __device__ void clampBackground(int& floorX, int& floorY,
+inline DEVICE void clampBackground(int& floorX, int& floorY,
                                        int& ceilX, int& ceilY,
                                        size_t  sizeX, size_t  sizeY) {
     clampBackground(floorX, ceilX, sizeX);
     clampBackground(floorY, ceilY, sizeY);
 }
-inline __device__ void clampBackground(int& floorX, int& floorY, int& floorZ,
+inline DEVICE void clampBackground(int& floorX, int& floorY, int& floorZ,
                                        int& ceilX, int& ceilY, int& ceilZ,
                                        size_t  sizeX, size_t  sizeY, size_t  sizeZ) {
     clampBackground(floorX, ceilX, sizeX);
@@ -71,35 +71,35 @@ inline __device__ void clampBackground(int& floorX, int& floorY, int& floorZ,
 
 // Wrap around strategy
 // Old version
-// __device__ void wrap(int& r, int b){
+// DEVICE void wrap(int& r, int b){
 //     if (r < 0) r += b;
 //     else if (r > b) r %= b;
 // }
-inline __device__ int safe_mod(int r, int b){
+inline DEVICE int safe_mod(int r, int b){
     int m = r % b;
     return (m < 0) ? m + b : m;
 }
 
-inline __device__ void wrap(int& r, int b){
+inline DEVICE void wrap(int& r, int b){
     r %= b;
     if (r < 0) {
         r += b;
     }
 }
 
-inline __device__ void wrapBackground(int& floorX,
+inline DEVICE void wrapBackground(int& floorX,
                                             int& ceilX,
                                             int sizeX) {
     wrap(floorX, sizeX);
     wrap(ceilX, sizeX);
 }
-inline __device__ void wrapBackground(int& floorX,int& floorY,
+inline DEVICE void wrapBackground(int& floorX,int& floorY,
                                             int& ceilX, int& ceilY,
                                             int  sizeX, int  sizeY) {
     wrapBackground(floorX, ceilX, sizeX);
     wrapBackground(floorY, ceilY, sizeY);
 }
-inline __device__ void wrapBackground(int& floorX,int& floorY,int& floorZ,
+inline DEVICE void wrapBackground(int& floorX,int& floorY,int& floorZ,
                                             int& ceilX, int& ceilY, int& ceilZ,
                                             int  sizeX, int  sizeY, int  sizeZ) {
     wrapBackground(floorX, ceilX, sizeX);
@@ -108,7 +108,7 @@ inline __device__ void wrapBackground(int& floorX,int& floorY,int& floorZ,
 }
 
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__
+inline DEVICE
 Real
 get_value_safe(const Real* arr, size_t nx, size_t ny, int i, int j, Real background=0.0f) {
     int ii=i, jj=j;
@@ -149,7 +149,7 @@ get_value_safe(const Real* arr, size_t nx, size_t ny, int i, int j, Real backgro
 }
 
 template<typename Real, BackgroundStrategy backgroundStrategy>
-inline __device__
+inline DEVICE
 Real
 get_value_safe(const Real* arr, int nx, int ny, int nz, int i, int j, int k, Real background=0.0f) {
     int ii=i, jj=j, kk=k;
@@ -192,7 +192,7 @@ get_value_safe(const Real* arr, int nx, int ny, int nz, int i, int j, int k, Rea
 }
 
 template<BackgroundStrategy backgroundStrategy>
-inline __device__ bool map_point(int& floorX, int& floorY,
+inline DEVICE bool map_point(int& floorX, int& floorY,
                int& ceilX, int& ceilY,
                size_t  sizeX, size_t  sizeY) {
 	// unknown background strategy, don't allow compilation
@@ -223,7 +223,7 @@ inline __device__ bool map_point(int& floorX, int& floorY,
 }
 
 template<BackgroundStrategy backgroundStrategy>
-inline __device__ bool map_point(int& floorX, int& floorY, int& floorZ,
+inline DEVICE bool map_point(int& floorX, int& floorY, int& floorZ,
                int& ceilX, int& ceilY, int& ceilZ,
                size_t  sizeX, size_t  sizeY, size_t  sizeZ) {
 	// unknown background strategy, don't allow compilation

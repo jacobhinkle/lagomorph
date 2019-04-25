@@ -1,4 +1,4 @@
-#include <torch/torch.h>
+#include <torch/extension.h>
 
 #include <vector>
 #include <string>
@@ -6,8 +6,28 @@
 #define CHECK_CUDA(x) AT_ASSERTM(x.type().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
+bool check_contiguous(std::vector<at::Tensor> tens) {
+    for (const auto& x : tens) {
+        if (!x.is_contiguous())
+            return false;
+    }
+    return true;
+}
+bool check_inputs(std::vector<at::Tensor> tens) {
+    for (const auto& x : tens) {
+        if (!x.is_contiguous() || !x.is_cuda())
+            return false;
+    }
+    return true;
+}
 
 bool lagomorph_debug_mode = false;
+
+// forward declarations of CPU entrypoints
+at::Tensor affine_interp_cpu_forward(
+    at::Tensor I,
+    at::Tensor A,
+    at::Tensor T);
 
 // forward declarations of cuda entrypoints
 at::Tensor interp_cuda_forward(
@@ -88,10 +108,11 @@ at::Tensor affine_interp_forward(
         at::Tensor I,
         at::Tensor A,
         at::Tensor T) {
-    CHECK_INPUT(I);
-    CHECK_INPUT(A);
-    CHECK_INPUT(T);
-    return affine_interp_cuda_forward(I, A, T);
+    check_contiguous({I, A, T});
+    if (I.is_cuda())
+        return affine_interp_cuda_forward(I, A, T);
+    else
+        return affine_interp_cpu_forward(I, A, T);
 }
 
 std::vector<at::Tensor> affine_interp_backward(

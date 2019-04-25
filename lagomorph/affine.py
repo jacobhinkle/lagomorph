@@ -4,7 +4,7 @@ from torch.distributed import all_reduce
 import numpy as np
 from .utils import tqdm, Tool
 from .data import batch_average
-import lagomorph_cuda
+import lagomorph_ext
 import math, ctypes
 
 
@@ -15,14 +15,14 @@ class AffineInterpFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, I, A, T):
         ctx.save_for_backward(I, A, T)
-        return lagomorph_cuda.affine_interp_forward(
+        return lagomorph_ext.affine_interp_forward(
             I.contiguous(),
             A.contiguous(),
             T.contiguous())
     @staticmethod
     def backward(ctx, grad_out):
         I, A, T = ctx.saved_tensors
-        d_I, d_A, d_T = lagomorph_cuda.affine_interp_backward(
+        d_I, d_A, d_T = lagomorph_ext.affine_interp_backward(
                 grad_out.contiguous(),
                 I.contiguous(),
                 A.contiguous(),
@@ -134,7 +134,7 @@ class RegridFunction(torch.autograd.Function):
         ctx.outorigin = origin
         ctx.outspacing = spacing
         ctx.displacement = displacement
-        reg = lagomorph_cuda.regrid_forward(
+        reg = lagomorph_ext.regrid_forward(
             I.contiguous(),
             outshape,
             origin,
@@ -149,7 +149,7 @@ class RegridFunction(torch.autograd.Function):
         return reg
     @staticmethod
     def backward(ctx, grad_out):
-        d_I = lagomorph_cuda.regrid_backward(
+        d_I = lagomorph_ext.regrid_backward(
             grad_out.contiguous(),
             ctx.inshape,
             ctx.outshape,

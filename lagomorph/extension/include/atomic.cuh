@@ -1,6 +1,8 @@
 /* vim: set ft=cuda: */
 #pragma once
 
+#ifdef __CUDA_ARCH__
+
 #if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 600
 #else
 __device__ double atomicAdd(double* address, double val)
@@ -21,3 +23,5 @@ __device__ double atomicAdd(double* address, double val)
     return __longlong_as_double(old);
 }
 #endif
+
+#endif // __CUDA_ARCH__

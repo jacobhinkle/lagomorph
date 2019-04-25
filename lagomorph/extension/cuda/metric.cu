@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "atomic.cuh"
-#include "defs.cuh"
-#include "interp.cuh"
+#include "defs.h"
+#include "interp.h"
 
 #define PI  3.14159265358979323846
 

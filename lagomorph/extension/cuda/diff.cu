@@ -5,8 +5,8 @@
 
 #include <vector>
 
-#include "defs.cuh"
-#include "diff.cuh"
+#include "defs.h"
+#include "diff.h"
 
 // Templated function to compute the Jacobian matrix of the first vector field
 // and contract it with the second vector field in a point-wise fashion. The
