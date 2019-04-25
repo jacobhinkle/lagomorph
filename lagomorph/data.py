@@ -87,6 +87,17 @@ class H5Dataset(Dataset):
             return Is
 
 
+class MapDataset(Dataset):
+    """Simply map a function over elements of a dataset"""
+    def __init__(self, dataset, fun):
+        self.dataset = dataset
+        self.fun = fun
+    def __len__(self):
+        return len(self.dataset)
+    def __getitem__(self, idx):
+        return self.fun(self.dataset[idx])
+
+
 class CropDataset(Dataset):
     def __init__(self, dataset, slices):
         self.dataset = dataset
