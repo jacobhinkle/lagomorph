@@ -421,7 +421,8 @@ class _Tool(Tool):
         dg.add_argument('input', type=str, help='Path to input image HDF5 file')
         dg.add_argument('--force_dim', default=None, type=int, help='Force dimension of images instead of determining based on dataset shape')
         dg.add_argument('--h5key', '-k', default='images', help='Name of dataset in input HDF5 file')
-        dg.add_argument('--loader_workers', default=8, help='Number of concurrent workers for dataloader')
+        dg.add_argument('--loader_workers', default=8, type=int, help='Number of concurrent workers for dataloader')
+        dg.add_argument('--data_inmemory', action='store_true', help='Load entire dataset into memory first')
         dg.add_argument('output', type=str, help='Path to output HDF5 file')
 
         ag = parser.add_argument_group('algorithm parameters')
@@ -439,10 +440,16 @@ class _Tool(Tool):
         args = parser.parse_args(sys.argv[2:])
         self._initialize_compute(args)
 
-        from .data import H5Dataset
-        dataset = H5Dataset(args.input, key=args.h5key, return_indices=True,
+        from .data import H5Dataset, load_dataset
+        dataset = load_dataset(args.input, key=args.h5key, return_indices=True,
                 force_dim=args.force_dim)
 
+        if args.data_inmemory:
+            pinned = []
+            for i in tqdm(range(len(dataset)), 'pre-loading data'):
+                ix, x = dataset[i]
+                pinned.append((ix, torch.as_tensor(x).pin_memory()))
+            dataset = pinned
         # initialize affine transforms on CPU for entire dataset
         n = len(dataset)
         ds0 = dataset[0][1]
