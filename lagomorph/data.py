@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import h5py
+import numpy as np
 from .utils import tqdm, Tool
 
 
@@ -44,11 +45,11 @@ class H5Dataset(Dataset):
     def __init__(self, h5path, key='images', return_indices=False, dtype=None,
             force_dim=None):
         self.h5path = h5path
-        if not isinstance(key, tuple):
+        if not isinstance(key, (tuple,list)):
             key = (key,)
         self.key = key
         self.return_indices = return_indices
-        if not isinstance(dtype, tuple):
+        if not isinstance(dtype, (tuple,list)):
             dtype = tuple([dtype for k in key])
         self.dtype = dtype
         self.force_dim = force_dim
@@ -85,6 +86,18 @@ class H5Dataset(Dataset):
             return idx, Is
         else:
             return Is
+
+
+class SubsetDataset(Dataset):
+    """Extract from a list of elements of a dataset"""
+    def __init__(self, dataset, indices):
+        self.dataset = dataset
+        self.indices = indices
+    def __len__(self):
+        return len(self.indices)
+    def __getitem__(self, idx):
+        idx = self.indices[idx]
+        return self.dataset[idx]
 
 
 class MapDataset(Dataset):
@@ -195,13 +208,13 @@ def write_dataset_h5(dataset, h5path, key='images'):
     argument 'extra_keys'.
     """
     from .utils import tqdm
-    if not isinstance(key, tuple):
+    if not isinstance(key, (list,tuple)):
         # make key a tuple if it's not already
         key = (key,)
     with h5py.File(h5path, 'w') as f:
         # determine size needed for h5 dataset
         ds0 = dataset[0]
-        if not isinstance(ds0, tuple):
+        if not isinstance(ds0, (list,tuple)):
             ds0 = (ds0,)
         # check that the length of the tuple matches args
         if len(ds0) != len(key):
@@ -289,12 +302,13 @@ def load_dataset(path, **kwargs):
 class _Tool(Tool):
     """Generic dataset utilities not specific to one class of registration methods"""
     module_name = "lagomorph data"
-    subcommands = ["average", "crop", "downscale", "numexpr"]
+    subcommands = ["average", "crop", "downscale", "numexpr", "split"]
     @staticmethod
-    def copy_other_keys(self, infile, outfile, key):
+    def copy_other_keys(infile, outfile, key):
         with h5py.File(infile, 'r') as fi, h5py.File(outfile, 'a') as fo:
             for k in tqdm(fi.keys(), desc='other keys'):
-                if k != key:
+                if (isinstance(key, str) and k != key) or \
+                    (isinstance(key, (list,tuple)) and k not in key):
                     fi.copy(k, fo)
     def average(self):
         """Average a dataset inside an HDF5 file in the first dimension"""
@@ -335,7 +349,7 @@ class _Tool(Tool):
 
         write_dataset(dsds, args.output, key=args.key)
         with h5py.File(args.output, 'a') as f:
-            self._stamp_dataset(f[args.h5key], args)
+            self._stamp_dataset(f[args.key], args)
         if args.copy_other_keys:
             self.copy_other_keys(args.input, args.output, args.key)
     def crop(self):
@@ -397,3 +411,138 @@ class _Tool(Tool):
             self._stamp_dataset(f[args.h5key], args)
         if args.copy_other_keys:
             self.copy_other_keys(args.input, args.output, args.h5key)
+
+    def split(self):
+        """Split a dataset into training and testing (or validation)"""
+        import argparse, sys
+        parser = self.new_parser('split')
+        # prefixing the argument with -- means it's optional
+        parser.add_argument('input', type=str, help='Path to input image HDF5 file')
+        parser.add_argument('train_output', type=str, help='Path to output HDF5 file (training)')
+        parser.add_argument('test_output', type=str, help='Path to output HDF5 file (testing)')
+        parser.add_argument('--h5keys', default='images,labels', help='Name of datasets in input and HDF5 files (comma-separated)')
+        parser.add_argument('--copy_other_keys', action='store_true', help='Copy all other keys from input file into output verbatim')
+        parser.add_argument('--random_seed', default=0, type=int, help='Random seed to use for determining split')
+        parser.add_argument('--test_size', default=0.25, help='Size of test size. If <= 1, proportion of dataset to use. Otherwise number of samples.')
+        parser.add_argument('--stratify_key', default=None, help='Key to use for stratification labels')
+        args = parser.parse_args(sys.argv[2:])
+
+        keys = args.h5keys.split(',')
+
+        test_size = float(args.test_size)
+        if test_size > 1: # if not a proportion, should be an integer
+            test_size = int(args.test_size)
+
+        dataset = H5Dataset(args.input, key=keys)
+
+        stratify = None
+        if args.stratify_key is not None:
+            # load all the labels
+            with h5py.File(args.input, 'r') as f:
+                stratify = np.array(f[args.stratify_key])
+            if len(stratify.shape) == 2:
+                if stratify.shape[1] == 1:
+                    stratify = stratify.squeeze(1)
+            elif len(stratify.shape) > 2:
+                raise Exception(f"Dimension of dataset {args.stratify_key} cannot be more than two")
+
+        if stratify is None or len(stratify.shape) == 1:
+            from sklearn.model_selection import train_test_split
+            ix_train, ix_test = train_test_split(range(len(dataset)),
+                    test_size=test_size, random_state=args.random_seed,
+                    stratify=stratify)
+        else:
+            from skmultilearn.model_selection import iterative_train_test_split
+            # set random seeds manually
+            import random
+            random.seed(args.random_seed)
+            np.random.seed(args.random_seed)
+            ix_train, y_train, ix_test, y_test = iterative_train_test_split(
+                    np.arange(len(dataset), dtype=np.uint32).reshape(-1,1),
+                    stratify,
+                    test_size=test_size)
+
+        dstrain = SubsetDataset(dataset, ix_train.squeeze(1))
+        dstest = SubsetDataset(dataset, ix_test.squeeze(1))
+
+        write_dataset_h5(dstrain, args.train_output, key=keys)
+        with h5py.File(args.train_output, 'a') as f:
+            self._stamp_dataset(f[keys[0]], args)
+        if args.copy_other_keys:
+            self.copy_other_keys(args.input, args.train_output, keys)
+
+        write_dataset_h5(dstest, args.test_output, key=keys)
+        with h5py.File(args.test_output, 'a') as f:
+            self._stamp_dataset(f[keys[0]], args)
+        if args.copy_other_keys:
+            self.copy_other_keys(args.input, args.test_output, keys)
+    def splitcv(self):
+        """Split a dataset into training and testing sets for cross-validation"""
+        import argparse, sys
+        parser = self.new_parser('split')
+        # prefixing the argument with -- means it's optional
+        parser.add_argument('input', type=str, help='Path to input image HDF5 file')
+        parser.add_argument('output_format', type=str, help='Path to output HDF5 file (use placeholders {fold} and {split})')
+        parser.add_argument('--h5keys', default='images,labels', help='Name of datasets in input and HDF5 files (comma-separated)')
+        parser.add_argument('--copy_other_keys', action='store_true', help='Copy all other keys from input file into output verbatim')
+        parser.add_argument('--random_seed', default=0, type=int, help='Random seed to use for determining split')
+        parser.add_argument('--num_folds', default=2, type=int, help='Number of cross-validation folds')
+        parser.add_argument('--stratify_key', default=None, help='Key to use for stratification labels')
+        args = parser.parse_args(sys.argv[2:])
+
+        keys = args.h5keys.split(',')
+
+        test_size = 1./args.num_folds
+
+        dataset = H5Dataset(args.input, key=keys)
+
+        stratify = None
+        if args.stratify_key is not None:
+            # load all the labels
+            with h5py.File(args.input, 'r') as f:
+                stratify = np.array(f[args.stratify_key])
+            if len(stratify.shape) == 2:
+                if stratify.shape[1] == 1:
+                    stratify = stratify.squeeze(1)
+            elif len(stratify.shape) > 2:
+                raise Exception(f"Dimension of dataset {args.stratify_key} cannot be more than two")
+
+        # get a k-partition of indices
+        parts = []
+        if stratify is None or len(stratify.shape) == 1:
+            from sklearn.model_selection import train_test_split
+            ix_train, ix_test = train_test_split(range(len(dataset)),
+                    test_size=test_size, random_state=args.random_seed,
+                    stratify=stratify)
+        else:
+            from skmultilearn.model_selection import IterativeStratification
+            # set random seeds manually
+            import random
+            random.seed(args.random_seed)
+            np.random.seed(args.random_seed)
+            stratifier = IterativeStratification(n_splits=args.num_folds, order=2,
+                    sample_distribution_per_fold=[test_size, 1.0-test_size])
+            for train_indices, test_indices in stratifier:
+                parts.append((train_indices,test_indices))
+
+        for i in range(args.num_folds):
+            ix_train = parts[i][0]
+            ix_test = parts[i][1]
+
+            dstrain = SubsetDataset(dataset, ix_train)
+            dstest = SubsetDataset(dataset, ix_test)
+
+            train_name = args.output_format.format(fold=i, split='train')
+            test_name = args.output_format.format(fold=i, split='test')
+
+            write_dataset_h5(dstrain, train_name, key=keys)
+            with h5py.File(train_name, 'a') as f:
+                self._stamp_dataset(f[keys[0]], args)
+            if args.copy_other_keys:
+                self.copy_other_keys(args.input, train_name, keys)
+
+            write_dataset_h5(dstest, test_name, key=keys)
+            with h5py.File(test_name, 'a') as f:
+                self._stamp_dataset(f[keys[0]], args)
+            if args.copy_other_keys:
+                self.copy_other_keys(args.input, test_name, keys)
