@@ -112,7 +112,6 @@ class LDDMMAtlasBuilder:
             metric=None,
             momentum_shape=None,
             image_shape=None,
-            image_shape=None,
             momentum_preconditioning=False,
             checkpoint_format=None,
             device='cuda',
