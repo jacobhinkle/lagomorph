@@ -1,4 +1,5 @@
-import argparse, sys
+import torch
+import argparse, sys, os
 
 # from https://github.com/slundberg/shap/issues/121
 IN_IPYNB = None
@@ -116,10 +117,21 @@ class Tool:
         else:
             self.gpu = int(self.gpu)
 
-        import torch
         torch.cuda.set_device(self.gpu)
 
+        self._initialize_torch()
+    def _initialize_torch(self):
         if self.world_size > 1:
+            # check that environment is set properly. If not, fill in with
+            # default values
+            if 'MASTER_ADDR' not in os.environ:
+                # Get the address of the first node in the communicator
+                from mpi4py import MPI
+                nodename = MPI.Get_processor_name()
+                nodelist = MPI.COMM_WORLD.allgather(nodename)
+                os.environ['MASTER_ADDR'] = nodelist[0]
+            if 'MASTER_PORT' not in os.environ:
+                os.environ['MASTER_PORT'] = '1234'
             torch.distributed.init_process_group(backend='nccl',
                     world_size=self.world_size, rank=self.rank,
                     init_method='env://')
