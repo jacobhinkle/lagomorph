@@ -69,7 +69,7 @@ class H5Dataset(Dataset):
         Is = []
         for i, (k, dt) in enumerate(zip(self.key, self.dtype)):
             with h5py.File(self.h5path, 'r') as f:
-                I = torch.as_tensor(f[k][idx,...])
+                I = torch.Tensor(f[k][idx,...])
             if i == 0: # forcing applies only to first key
                 if dt is not None:
                     I = I.type(dt)
