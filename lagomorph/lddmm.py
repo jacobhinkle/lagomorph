@@ -111,7 +111,10 @@ class LDDMMAtlasBuilder:
             learning_rate_image = 1e4,
             metric=None,
             momentum_shape=None,
+            image_shape=None,
+            image_shape=None,
             momentum_preconditioning=False,
+            checkpoint_format=None,
             device='cuda',
             world_size=1,
             rank=0):
@@ -158,6 +161,10 @@ class LDDMMAtlasBuilder:
                     self.I0 /= world_size
         else:
             self.I0 = self.I0.clone().to(self.device)
+        if self.image_shape is None:
+            self.image_shape = self.dataset[0][1].shape[1:]
+        if self.I0.shape[2:] != self.image_shape:
+            self.I0 = regrid(self.I0, self.image_shape)
         self.I = self.I0.view(1,1,*self.I0.squeeze().shape)
         self.image_optimizer = torch.optim.SGD([self.I],
                                           lr=self.learning_rate_image,
@@ -222,7 +229,7 @@ class LDDMMAtlasBuilder:
             m.grad.detach_()
             m.grad.zero_()
         h = expmap(self.metric, m, num_steps=self.lddmm_integration_steps)
-        if self.regrid_momenta:
+        if self.regrid_momenta: # upscale the deformation to apply to atlas
             h = regrid(h, shape=self.I.shape[2:])
         Idef = deform.interp(self.I, h)
         v = self.metric.sharp(m)
@@ -273,6 +280,8 @@ class LDDMMAtlasBuilder:
             epoch_loss += iter_loss
             epoch_reg_term += iter_reg_term
         self.update_base_image(force=True)
+        if self.checkpoint_format is not None:
+            self.save(self.checkpoint_format.format(epoch=self._epoch))
         return epoch_loss, epoch_reg_term
     def run(self):
         self.initialize()
@@ -280,7 +289,7 @@ class LDDMMAtlasBuilder:
         if self.rank == 0:
             epbar = tqdm(epbar)
         self.image_optimizer.zero_grad()
-        for epoch in epbar:
+        for self._epoch in epbar:
             epoch_loss, epoch_reg_term = self.epoch()
             self.epoch_losses.append(epoch_loss)
             self.epoch_reg_terms.append(epoch_reg_term)
@@ -316,6 +325,7 @@ class _Tool(Tool):
         dg.add_argument('--h5key', '-k', default='images', help='Name of dataset in input HDF5 file')
         dg.add_argument('--loader_workers', default=8, help='Number of concurrent workers for dataloader')
         dg.add_argument('output', type=str, help='Path to output HDF5 file')
+        dg.add_argument('--checkpoint', default=None, type=str, help='Format for HDF5 checkpoints (default: no checkpointing). Use {epoch} placeholder in filename.')
 
         ag = parser.add_argument_group('algorithm parameters')
         ag.add_argument('--initial_atlas', default=None, type=str, help="Path to h5 file with which to initialize image and momenta")
@@ -324,7 +334,7 @@ class _Tool(Tool):
         ag.add_argument('--precondition_momentum', action='store_true', help='Whether to precondition momentum before gradient descent by applying metric operator')
         ag.add_argument('--image_update_freq', default=0, type=int, help='Update base image every N iterations. 0 for once per epoch')
         ag.add_argument('--lddmm_steps', default=1, type=int, help='LDDMM gradient steps to take each iteration')
-        ag.add_argument('--deformation_scale', default=1, type=int, help='Amount to downscale grid for LDDMM momenta/deformation')
+        ag.add_argument('--deformation_downscale', default=1, type=int, help='Amount to downscale grid for LDDMM momenta/deformation relative to data')
         ag.add_argument('--reg_weight', default=1e-1, type=float, help='Amount of regularization for deformations')
         ag.add_argument('--learning_rate_m', default=1e-3, type=float, help='Learning rate for momenta')
         ag.add_argument('--learning_rate_I', default=1e5, type=float, help='Learning rate for atlas image')
@@ -340,9 +350,9 @@ class _Tool(Tool):
         dataset = H5Dataset(args.input, key=args.h5key, return_indices=True,
                 force_dim=args.force_dim)
 
-        if args.deformation_scale != 1:
+        if args.deformation_downscale != 1:
             im0 = dataset[0][1]
-            momentum_shape = [s//args.deformation_scale for s in im0.shape[1:]]
+            momentum_shape = [s//args.deformation_downscale for s in im0.shape[1:]]
             del im0
         else:
             momentum_shape = None
@@ -357,6 +367,7 @@ class _Tool(Tool):
             momentum_shape=momentum_shape,
             reg_weight=args.reg_weight,
             momentum_preconditioning=args.precondition_momentum,
+            checkpoint_format=args.checkpoint,
             metric=metric,
             learning_rate_pose=args.learning_rate_m,
             learning_rate_image=args.learning_rate_I,
