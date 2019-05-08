@@ -79,12 +79,15 @@ class Tool:
         for c in self.subcommands:
             usage += f"{c:15s} {self.describe_subcommand(c)}\n"
         usage += "\n"
-        parser = self.new_parser(usage=usage)
-        parser.add_argument("command", help='Subcommand to run')
-        args = parser.parse_args(sys.argv[1:2])
+        self.parser = self.new_parser(usage=usage)
+        self.parser.add_argument("command", help='Subcommand to run')
+    def run(self, argv=None):
+        if argv is None:
+            argv = sys.argv
+        args = self.parser.parse_args(sys.argv[1:2])
         if args.command not in self.subcommands:
             print('ERROR: Unrecognized command')
-            parser.print_help()
+            self.parser.print_help()
             sys.exit(1)
         self.call_subcommand(args.command)
     def describe_subcommand(self, sub):
