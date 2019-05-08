@@ -14,7 +14,7 @@ setup(
     install_requires=['torch>=0.4.0','numpy'],
     tests_require=['pytest'],
     cmdclass={'build_ext': BuildExtension},
-    entry_points={'console_scripts':['lagomorph=lagomorph.__main__:LagomorphTool']},
+    entry_points={'console_scripts':['lagomorph=lagomorph.__main__:main']},
     ext_modules=[CUDAExtension('lagomorph_ext', [
             'lagomorph/extension/cpu/affine.cpp',
             'lagomorph/extension/cuda/affine.cu',

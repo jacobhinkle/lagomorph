@@ -11,9 +11,13 @@ class LagomorphTool(Tool):
         import sys
         # remove subcommand arg before passing it down
         del sys.argv[1]
-        return getattr(globals()[command], '_Tool')()
+        return getattr(globals()[command], '_Tool')().run()
     def describe_subcommand(self, command):
-        return getattr(globals()[command], '_Tool').__doc__
+        return getattr(globals()[command], '_Tool')().__doc__
+
+def main():
+    t = LagomorphTool()
+    t.run()
 
 if __name__ == '__main__':
-    LagomorphTool()
+    main()
