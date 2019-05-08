@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 import h5py
 import numpy as np
 from .utils import tqdm, Tool
+import os
 
 
 class MemoryDataset(Dataset):
@@ -16,7 +17,7 @@ class MemoryDataset(Dataset):
 
 
 class ZarrDataset(Dataset):
-    def __init__(self, path, key='images', return_indices=False, force_dim=None):
+    def __init__(self, path, key='images', force_dim=None):
         try:
             import zarr, lmdb
         except ImportError:
@@ -24,17 +25,12 @@ class ZarrDataset(Dataset):
             raise
         self.path = path
         self.key = key
-        self.return_indices = return_indices
         self.ds = zarr.open(path)[key]
     def __len__(self):
         return self.ds.shape[0]
     def __getitem__(self, idx): 
         I = self.ds[idx,...]
-        I = torch.Tensor(I)
-        if self.return_indices:
-            return idx, I
-        else:
-            return I
+        return torch.Tensor(I)
 
 
 class H5Dataset(Dataset):
@@ -42,13 +38,12 @@ class H5Dataset(Dataset):
     PyTorch generic Dataset for HDF5 files with dataset having first dimension
     corresponding to subject.
     """
-    def __init__(self, h5path, key='images', return_indices=False, dtype=None,
+    def __init__(self, h5path, key='images', dtype=None,
             force_dim=None):
         self.h5path = h5path
         if not isinstance(key, (tuple,list)):
             key = (key,)
         self.key = key
-        self.return_indices = return_indices
         if not isinstance(dtype, (tuple,list)):
             dtype = tuple([dtype for k in key])
         self.dtype = dtype
@@ -82,10 +77,18 @@ class H5Dataset(Dataset):
             Is.append(I)
         if len(Is) == 1:
             Is = Is[0]
-        if self.return_indices:
-            return idx, Is
-        else:
-            return Is
+        return Is
+
+
+class IndexedDataset(Dataset):
+    """Return pair of index and original element from dataset"""
+    def __init__(self, dataset):
+        self.dataset = dataset
+    def __len__(self):
+        return len(self.dataset)
+    def __getitem__(self, idx):
+        return idx, self.dataset[idx]
+
 
 
 class SubsetDataset(Dataset):
@@ -166,12 +169,98 @@ class DownscaledDataset(Dataset):
             J = F.avg_pool2d(J, self.scale)
         return J
 
-def batch_average(dataloader, dim=0, returns_indices=False, progress_bar=True):
+
+class PreCachedDataset(Dataset):
+    """Cache data to a tempdir during initialization"""
+    def __init__(self, dataset, sampler, cache_dir=None, device='cpu'):
+        import tempfile
+        self.dataset = dataset
+        self.sampler = sampler
+        self.device = device
+        self._tmpdir = tempfile.TemporaryDirectory(dir=cache_dir, prefix='lagomorph.PreCachedDataset.')
+        self.tmpdir = self._tmpdir.name
+        for j in sampler:
+            torch.save(dataset[j], self.filename(j))
+    def filename(self, j):
+        return os.path.join(self.tmpdir, f"{j}.pth")
+    def __len__(self):
+        return len(self.dataset)
+    def __getitem__(self, j):
+        if j is None:
+            raise ValueError(f'Index {j} was not cached by PreCachedDataset')
+        return torch.load(self.filename(j), map_location=self.device)
+
+
+class LazyCachedDataset(Dataset):
+    """Cache data to a tempdir as samples are requested"""
+    def __init__(self, dataset, cache_dir=None, device='cpu'):
+        import tempfile
+        self.dataset = dataset
+        self.device = device
+        self._tmpdir = tempfile.TemporaryDirectory(dir=cache_dir, prefix='lagomorph.LazyCachedDataset.')
+        self.tmpdir = self._tmpdir.name
+    def filename(self, j):
+        return os.path.join(self.tmpdir, f"{j}.pth")
+    def __len__(self):
+        return len(self.dataset)
+    def __getitem__(self, j):
+        fn = self.filename(j)
+        if os.path.isfile(fn):
+            return torch.load(fn, map_location=self.device)
+        else:
+            di = self.dataset[j]
+            torch.save(di, fn)
+            return di
+
+
+class CachedDataLoader:
+    """Given a dataloader, pass through it once to cache the minibatches
+    
+    Note that this does not inherit from torch.DataLoader, and does _not_
+    exploit multiprocessing."""
+    def __init__(self, dataloader, cache_dir=None, progress_bar=True, device='cpu'):
+        import tempfile
+        self.dataloader = dataloader
+        self.dataset = dataloader.dataset
+        self.device = device
+        self._tmpdir = tempfile.TemporaryDirectory(dir=cache_dir, prefix='lagomorph.CachedDataLoader.')
+        self.tmpdir = self._tmpdir.name
+        self.filenames = []
+        bar = self.dataloader
+        if progress_bar:
+            bar = tqdm(bar, desc='Caching minibatches')
+        for j, b in enumerate(self.dataloader):
+            fn = self.filename(j)
+            torch.save(b.to(self.device), fn)
+            self.filenames.append(fn)
+    def filename(self, j):
+        return os.path.join(self.tmpdir, f"{j}.pth")
+    def __len__(self):
+        return len(self.filenames)
+    def __iter__(self):
+        return _FilenameDataLoaderIter(self.filenames, self.device)
+class _FilenameDataLoaderIter:
+    def __init__(self, filenames, device):
+        self.filenames = filenames
+        self.device = device
+        self.i = 0
+    def __len__(self):
+        return len(self.filenames)
+    def __iter__(self):
+        return self
+    def __next__(self):
+        f = self.filenames[self.i]
+        self.i += 1
+        return torch.load(f, map_location=self.device)
+
+
+def batch_average(dataloader, dim=0, progress_bar=True):
     """Compute the average using streaming batches from a dataloader along a given dimension"""
     avg = None
     dtype = None
     sumsizes = 0
     comp = 0.0 # Kahan sum compensation
+    returns_indices = isinstance(dataloader.dataset, IndexedDataset)
     with torch.no_grad():
         dl = dataloader
         if progress_bar:
@@ -323,11 +412,11 @@ class _Tool(Tool):
         parser.add_argument('--batch_size', default=50, type=int, help='Batch size')
         args = parser.parse_args(sys.argv[2:])
 
-        dataset = H5Dataset(args.input, key=args.h5key, return_indices=False)
+        dataset = H5Dataset(args.input, key=args.h5key)
         dataloader = DataLoader(dataset, batch_size=args.batch_size,
                                 shuffle=False, num_workers=args.loader_workers,
                                 pin_memory=True, drop_last=False)
-        Iav = batch_average(dataloader, returns_indices=False)
+        Iav = batch_average(dataloader)
         with h5py.File(args.output,'w') as f:
             ds = f.create_dataset(args.output_h5key, data=Iav.unsqueeze(0))
             self._stamp_dataset(ds, args)

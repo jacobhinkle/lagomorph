@@ -288,7 +288,7 @@ def affine_atlas(dataset,
     if I is None:
         with torch.no_grad():
             # initialize base image to mean
-            I = batch_average(dataloader, dim=0, returns_indices=True,
+            I = batch_average(dataloader, dim=0,
                     progress_bar=rank==0).to(device)
             if world_size > 1:
                 all_reduce(I)
@@ -441,7 +441,7 @@ class _Tool(Tool):
         self._initialize_compute(args)
 
         from .data import H5Dataset, load_dataset
-        dataset = load_dataset(args.input, key=args.h5key, return_indices=True,
+        dataset = load_dataset(args.input, key=args.h5key,
                 force_dim=args.force_dim)
 
         if args.data_inmemory:

@@ -11,6 +11,7 @@ import numpy as np
 from . import deform
 from . import adjrep
 from .affine import regrid
+from .data import PreCachedDataset, LazyCachedDataset, CachedDataLoader
 from .metric import FluidMetric, Metric
 from .utils import tqdm, Tool
 import math
@@ -95,7 +96,6 @@ def expmap(metric, m0, T=1.0, num_steps=10, phiinv=None, mommask=None, checkpoin
     return phiinv
 
 class LDDMMAtlasBuilder:
-    _initialized = False
     def __init__(self,
             dataset,
             I0=None,
@@ -103,6 +103,7 @@ class LDDMMAtlasBuilder:
             num_epochs=500,
             batch_size=10,
             loader_workers=8,
+            dataloader_cache=None,
             lddmm_steps=1,
             lddmm_integration_steps=5,
             image_update_freq=0,
@@ -119,13 +120,15 @@ class LDDMMAtlasBuilder:
             rank=0):
         # just record all arguments to constructor as members
         args = vars()
+        self._initialized = False
         self._initvars = []
         for k,v in args.items():
             if k != 'self' and k not in vars(self): # k is an arg to this method
                 setattr(self, k, v)
                 self._initvars.append(k)
     def __setattr__(self, k, v):
-        if self._initialized and k in self._initvars:
+        if k not in ['_initvars', '_initialized'] and \
+                (k in self._initvars and self._initialized):
             raise Exception(f'Member {k} was set in constructor and cannot be '
                     'overwritten after initialization')
         self.__dict__[k] = v
@@ -136,6 +139,8 @@ class LDDMMAtlasBuilder:
             self._init_metric()
             self._init_losses()
             self._init_momenta()
+            self._iteration = 0
+            self._epoch = 0
             self._initialized = True
     def _init_dataloader(self):
         if self.world_size > 1:
@@ -146,28 +151,32 @@ class LDDMMAtlasBuilder:
             sampler = None
         self.dataloader = DataLoader(self.dataset, sampler=sampler,
                 batch_size=self.batch_size, num_workers=self.loader_workers,
-                pin_memory=True, shuffle=False)
+                pin_memory=True, shuffle=False, drop_last=False)
+        if self.dataloader_cache is not None:
+            self.dataloader = CachedDataLoader(self.dataloader,
+                    cache_dir=self.dataloader_cache, progress_bar=self.rank==0)
     def _init_atlas_image(self):
         if self.I0 is None: # initialize base image to mean
             from .affine import batch_average
             with torch.no_grad():
                 # initialize base image to mean
                 self.I0 = batch_average(self.dataloader, dim=0,
-                        returns_indices=True,
-                        progress_bar=rank==0).to(self.device)
-                if world_size > 1:
+                        progress_bar=self.rank==0)
+                self.I0 = self.I0.unsqueeze(0).to(self.device)
+                if self.world_size > 1:
                     all_reduce(self.I0)
-                    self.I0 /= world_size
+                    self.I0 /= self.world_size
         else:
-            self.I0 = self.I0.clone().to(self.device)
+            self.I0 = self.I0.detach().to(self.device)
         if self.image_shape is None:
-            self.image_shape = self.dataset[0][1].shape[1:]
+            self.image_shape = self.dataset[0].shape[1:]
         if self.I0.shape[2:] != self.image_shape:
             self.I0 = regrid(self.I0, self.image_shape)
         self.I = self.I0.view(1,1,*self.I0.squeeze().shape)
         self.image_optimizer = torch.optim.SGD([self.I],
                                           lr=self.learning_rate_image,
                                           weight_decay=0)
+        self.image_optimizer.zero_grad()
     def _init_metric(self):
         if self.metric is None:
             self.metric = FluidMetric([.1,0,.01])
@@ -187,25 +196,46 @@ class LDDMMAtlasBuilder:
             self.momentum_shape = self.I.shape[-dim:]
         self.regrid_momenta = self.momentum_shape != self.I.shape[-dim:]
         if self.ms is None:
-            self.ms = torch.zeros(len(self.dataset),dim,*self.momentum_shape)
-        self.ms = self.ms.type(self.I.dtype).pin_memory()
+            self.ms = [torch.zeros(x.shape[0],dim,*self.momentum_shape)
+                    for x in self.dataloader]
+        self.ms = [m.type(self.I.dtype).cpu().pin_memory() for m in self.ms]
+    def save_momenta(self, handle):
+        n = sum([m.shape[0] for m in self.ms])
+        m0 = self.ms[0].detach().cpu().numpy()
+        hms = handle.create_dataset('momenta', shape=(n,*m0.shape[1:]),
+                dtype=np.float32)
+        i = 0
+        batch_sizes = []
+        for m in self.ms:
+            hms[i:i+m.shape[0],...] = m.detach().cpu().numpy()
+            i += m.shape[0]
+            batch_sizes.append(m.shape[0])
+        hms.attrs['batch_sizes'] = batch_sizes
     def save(self, filename):
         import h5py
         with h5py.File(filename, 'w') as f:
             atds = f.create_dataset('atlas', data=self.I.detach().cpu().numpy())
             # TODO: streaming copy of momenta
-            f.create_dataset('momenta', data=self.ms.detach().cpu().numpy())
+            self.save_momenta(f)
             f.create_dataset('epoch_losses', data=np.asarray(self.epoch_losses))
             f.create_dataset('epoch_reg_terms', data=np.asarray(self.epoch_reg_terms))
             f.create_dataset('iter_losses', data=np.asarray(self.iter_losses))
             f.create_dataset('iter_reg_terms', data=np.asarray(self.iter_reg_terms))
+    def load_momenta(self, handle):
+        self.ms = []
+        i = 0
+        szs = handle['momenta'].attrs['batch_sizes']
+        for s in szs:
+            self.ms.append(torch.Tensor(handle['momenta'][i:i+s,...]))
+            i += s
     def load(self, filename, load_image=True, load_momenta=True, load_losses=True):
+        print(f"Loading atlas from {filename}")
         import h5py
         with h5py.File(filename, 'r') as f:
             if load_image:
                 self.I0 = torch.Tensor(f['atlas'])
             if load_momenta:
-                self.ms = torch.Tensor(f['momenta'])
+                self.load_momenta(f)
             if load_losses:
                 self.epoch_losses = list(f['epoch_losses'])
                 self.epoch_reg_terms = list(f['epoch_reg_terms'])
@@ -247,33 +277,34 @@ class LDDMMAtlasBuilder:
             if self.momentum_preconditioning:
                 p = self.metric.flat(p)
             m.add_(-self.learning_rate_pose, p)
-            if self.world_size > 1:
-                all_reduce(loss)
-                all_reduce(reg_term)
-            m = m.detach()
-        return m, loss.item(), reg_term.item()
-    def iteration(self, ix, img):
-        m = self.ms[ix,...].detach()
-        m = m.to(self.device)
+        return m.detach(), loss, reg_term
+    def iteration(self, mcpu, img):
+        m = mcpu.to(self.device)
         img = img.to(self.device)
         for lit in range(self.lddmm_steps):
             self.I.requires_grad_(lit == self.lddmm_steps - 1)
             m, loss, reg_term = self.lddmm_step(m, img)
-        self.ms[ix,...] = m.to(self.ms.device)
+        if self.world_size > 1:
+            all_reduce(loss)
+            all_reduce(reg_term)
+        with torch.no_grad():
+            mcpu[...] = m.cpu()
+        del m, img
         self.image_iters += 1
         self.update_base_image()
-        return loss, reg_term
+        return loss.item(), reg_term.item()
     def epoch(self):
         epoch_loss = 0.0
         epoch_reg_term = 0.0
-        itbar = self.dataloader
+        itbar = zip(self.ms, self.dataloader)
         if self.rank == 0:
             itbar = tqdm(itbar, desc='iter')
         if self.image_update_freq == 0:
             self.image_optimizer.zero_grad()
         self.image_iters = 0 # how many iters accumulated
-        for it, (ix, img) in enumerate(itbar):
-            iter_loss, iter_reg_term = self.iteration(ix, img)
+        for self._iteration, (m, img) in enumerate(itbar):
+            iter_loss, iter_reg_term = self.iteration(m, img)
+            del m, img
             self.iter_losses.append(iter_loss)
             self.iter_reg_terms.append(iter_reg_term)
             epoch_loss += iter_loss
@@ -299,7 +330,7 @@ class LDDMMAtlasBuilder:
 
 class _Tool(Tool):
     """Diffeomorphic registration methods using LDDMM"""
-    module_name = 'lagomorph.lddmm'
+    module_name = 'lagomorph lddmm'
     subcommands = ['atlas']
     def atlas(self):
         """
@@ -322,8 +353,9 @@ class _Tool(Tool):
         dg.add_argument('input', type=str, help='Path to input image HDF5 file')
         dg.add_argument('--force_dim', default=None, type=int, help='Force dimension of images instead of determining based on dataset shape')
         dg.add_argument('--h5key', '-k', default='images', help='Name of dataset in input HDF5 file')
-        dg.add_argument('--loader_workers', default=8, help='Number of concurrent workers for dataloader')
+        dg.add_argument('--loader_workers', default=8, type=int, help='Number of concurrent workers for dataloader')
         dg.add_argument('output', type=str, help='Path to output HDF5 file')
+        dg.add_argument('--dataloader_cache', default=None, type=str, help='Cache minibatches for quicker iterations. Provide top-level directory for caching (unique subdirectory will be created), e.g. /mnt/bb/$USER')
         dg.add_argument('--checkpoint', default=None, type=str, help='Format for HDF5 checkpoints (default: no checkpointing). Use {epoch} placeholder in filename.')
 
         ag = parser.add_argument_group('algorithm parameters')
@@ -334,6 +366,7 @@ class _Tool(Tool):
         ag.add_argument('--image_update_freq', default=0, type=int, help='Update base image every N iterations. 0 for once per epoch')
         ag.add_argument('--lddmm_steps', default=1, type=int, help='LDDMM gradient steps to take each iteration')
         ag.add_argument('--deformation_downscale', default=1, type=int, help='Amount to downscale grid for LDDMM momenta/deformation relative to data')
+        ag.add_argument('--image_upscale', default=1, type=int, help='Amount to upscale grid for atlas image relative to data')
         ag.add_argument('--reg_weight', default=1e-1, type=float, help='Amount of regularization for deformations')
         ag.add_argument('--learning_rate_m', default=1e-3, type=float, help='Learning rate for momenta')
         ag.add_argument('--learning_rate_I', default=1e5, type=float, help='Learning rate for atlas image')
@@ -345,21 +378,25 @@ class _Tool(Tool):
         args = parser.parse_args(sys.argv[2:])
         self._initialize_compute(args)
 
-        from .data import H5Dataset
-        dataset = H5Dataset(args.input, key=args.h5key, return_indices=True,
-                force_dim=args.force_dim)
+        from .data import H5Dataset, IndexedDataset
+        dataset = H5Dataset(args.input, key=args.h5key, force_dim=args.force_dim)
 
+        im0 = dataset[0]
         if args.deformation_downscale != 1:
-            im0 = dataset[0][1]
             momentum_shape = [s//args.deformation_downscale for s in im0.shape[1:]]
-            del im0
         else:
             momentum_shape = None
+        if args.image_upscale != 1:
+            image_shape = [s*args.image_upscale for s in im0.shape[1:]]
+        else:
+            image_shape = None
+        del im0
 
         metric = Metric.from_args(args)
 
         builder = LDDMMAtlasBuilder(dataset,
             num_epochs=args.num_epochs,
+            dataloader_cache=args.dataloader_cache,
             batch_size=args.batch_size,
             lddmm_steps=args.lddmm_steps,
             image_update_freq=args.image_update_freq,
@@ -376,9 +413,13 @@ class _Tool(Tool):
             device=f"cuda:{self.gpu}")
 
         if args.initial_atlas is not None:
-            builder.load(args.initial_atlas)
+            builder.load(args.initial_atlas.format(rank=self.rank))
 
         builder.run()
+
+        args.output = args.output.format(rank=self.rank)
+
+        m0 = builder.ms[0].detach().cpu().numpy()
 
         builder.save(args.output)
 
