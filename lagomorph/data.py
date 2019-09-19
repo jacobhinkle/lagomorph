@@ -229,9 +229,9 @@ class CachedDataLoader:
         bar = self.dataloader
         if progress_bar:
             bar = tqdm(bar, desc='Caching minibatches')
-        for j, b in enumerate(self.dataloader):
+        for j, b in enumerate(bar):
             fn = self.filename(j)
-            torch.save(b.to(self.device), fn)
+            torch.save(b, fn)
             self.filenames.append(fn)
     def filename(self, j):
         return os.path.join(self.tmpdir, f"{j}.pth")
@@ -551,8 +551,8 @@ class _Tool(Tool):
                     stratify,
                     test_size=test_size)
 
-        dstrain = SubsetDataset(dataset, ix_train.squeeze(1))
-        dstest = SubsetDataset(dataset, ix_test.squeeze(1))
+        dstrain = SubsetDataset(dataset, ix_train)
+        dstest = SubsetDataset(dataset, ix_test)
 
         write_dataset_h5(dstrain, args.train_output, key=keys)
         with h5py.File(args.train_output, 'a') as f:
