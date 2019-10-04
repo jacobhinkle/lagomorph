@@ -82,7 +82,7 @@ at::Tensor interp_cuda_forward(
     at::Tensor u,
     double dt) {
     auto d = Iv.dim() - 2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional interpolation is supported")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional interpolation is supported")
     const dim3 threads(32, 32);
     const dim3 blocks((Iv.size(2) + threads.x - 1) / threads.x,
                     (Iv.size(3) + threads.y - 1) / threads.y);
@@ -251,7 +251,7 @@ std::vector<at::Tensor> interp_cuda_backward(
     bool need_I,
     bool need_u) {
     auto d = Iv.dim() - 2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional interpolation is supported")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional interpolation is supported")
     const dim3 threads(16, 32);
     const dim3 blocks((Iv.size(2) + threads.x - 1) / threads.x,
                     (Iv.size(3) + threads.y - 1) / threads.y);

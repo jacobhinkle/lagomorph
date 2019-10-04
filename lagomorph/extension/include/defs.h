@@ -33,6 +33,14 @@ extern bool lagomorph_debug_mode;
         } \
     }()
 
+// PyTorch 1.1 introduced TORCH_CHECK and deprecated AT_CHECK. The only known
+// incompatibility with 1.0 is the use of TORCH_CHECK, and this macro
+// definition should give us that amount of backward compatibility.
+#ifndef TORCH_CHECK
+#define TORCH_CHECK AT_CHECK
+#endif
+
+
 #ifdef __CUDACC__
 #define DEVICE __device__
 #else

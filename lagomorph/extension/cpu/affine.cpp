@@ -1,11 +1,11 @@
-#include <ATen/ATen.h>
+#include <torch/extension.h>
 
 #include <vector>
 
 #include "interp.h"
 
-#define CHECK_CPU(x) AT_ASSERTM(! x.type().is_cuda(), #x " must be a CPU tensor")
-#define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
+#define CHECK_CPU(x) TORCH_CHECK(! x.type().is_cuda(), #x " must be a CPU tensor")
+#define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CPU(x); CHECK_CONTIGUOUS(x)
 
 template<typename Real, bool broadcast_I>
@@ -133,9 +133,9 @@ at::Tensor affine_interp_cpu_forward(
     CHECK_INPUT(I)
     CHECK_INPUT(A)
     CHECK_INPUT(T)
-    AT_ASSERTM(A.size(0) == T.size(0), "A and T must have same first dimension")
+    TORCH_CHECK(A.size(0) == T.size(0), "A and T must have same first dimension");
     auto d = I.dim() - 2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported");
 
     const bool broadcast_I = I.size(0) == 1 && A.size(0) > 1;
 

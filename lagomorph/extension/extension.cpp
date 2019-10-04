@@ -3,8 +3,10 @@
 #include <vector>
 #include <string>
 
-#define CHECK_CUDA(x) AT_ASSERTM(x.type().is_cuda(), #x " must be a CUDA tensor")
-#define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
+#include "defs.h"
+
+#define CHECK_CUDA(x) TORCH_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
+#define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 bool check_contiguous(std::vector<at::Tensor> tens) {
     for (const auto& x : tens) {
@@ -163,9 +165,9 @@ void fluid_operator(
     const double gamma) {
     CHECK_INPUT(Fmv);
     size_t dim = Fmv.dim() - 3; // note that pytorch fft adds a dimension (size 2)
-    AT_ASSERTM(cosluts.size() == dim, "Must provide same number cosine LUTs ("
+    TORCH_CHECK(cosluts.size() == dim, "Must provide same number cosine LUTs ("
             + std::to_string(cosluts.size()) + ") as spatial dimension '" + std::to_string(dim) + "'")
-    AT_ASSERTM(sinluts.size() == dim, "Must provide same number sine LUTs ("
+    TORCH_CHECK(sinluts.size() == dim, "Must provide same number sine LUTs ("
             + std::to_string(sinluts.size()) + ") as spatial dimension '" + std::to_string(dim) + "'")
     return fluid_operator_cuda(Fmv, inverse, cosluts, sinluts, alpha, beta, gamma);
 }

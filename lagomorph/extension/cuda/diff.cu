@@ -132,18 +132,18 @@ at::Tensor jacobian_times_vectorfield_forward(
     bool displacement,
 	bool transpose) {
     auto d = g.dim() - 2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
     for (size_t dd=0; dd < d; ++dd)
-        AT_ASSERTM(v.size(dd+2) > 1, "Jacobian times vectorfield not implemented for 'thin' dimensions")
+        TORCH_CHECK(v.size(dd+2) > 1, "Jacobian times vectorfield not implemented for 'thin' dimensions")
     const dim3 threads(16, 32);
     const dim3 blocks((g.size(2) + threads.x - 1) / threads.x,
                     (g.size(3) + threads.y - 1) / threads.y);
 
-    AT_ASSERTM(g.size(0) == v.size(0), "arguments must have same batch size dimension")
-    AT_ASSERTM(v.size(1) == d, "vector field is of wrong dimension")
-    AT_ASSERTM(!displacement || g.size(1) == d, "Displacement mode only defined for vector fields")
+    TORCH_CHECK(g.size(0) == v.size(0), "arguments must have same batch size dimension")
+    TORCH_CHECK(v.size(1) == d, "vector field is of wrong dimension")
+    TORCH_CHECK(!displacement || g.size(1) == d, "Displacement mode only defined for vector fields")
     if (transpose)
-        AT_ASSERTM(g.size(1) == d, "Jacobian transpose only implemented for vector fields")
+        TORCH_CHECK(g.size(1) == d, "Jacobian transpose only implemented for vector fields")
 
     at::Tensor out = at::zeros_like(g);
 
@@ -486,13 +486,13 @@ std::vector<at::Tensor> jacobian_times_vectorfield_backward(
     const dim3 blocks((v.size(2) + threads.x - 1) / threads.x,
                     (v.size(3) + threads.y - 1) / threads.y);
 
-    AT_ASSERTM(v.size(0) == w.size(0), "arguments must have same batch size dimension")
+    TORCH_CHECK(v.size(0) == w.size(0), "arguments must have same batch size dimension")
     const auto d = v.dim()-2;
     for (size_t dd=0; dd < d; ++dd)
-        AT_ASSERTM(v.size(dd+2) > 1, "Jacobian times vectorfield not implemented for 'thin' dimensions")
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
-    AT_ASSERTM(w.size(1) == d, "vector field is of wrong dimension")
-    AT_ASSERTM(!displacement || v.size(1) == d, "Displacement mode only defined for vector fields")
+        TORCH_CHECK(v.size(dd+2) > 1, "Jacobian times vectorfield not implemented for 'thin' dimensions")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
+    TORCH_CHECK(w.size(1) == d, "vector field is of wrong dimension")
+    TORCH_CHECK(!displacement || v.size(1) == d, "Displacement mode only defined for vector fields")
 
     at::Tensor d_v, d_w;
     if (need_v) d_v = at::zeros_like(v);
@@ -638,8 +638,8 @@ at::Tensor jacobian_times_vectorfield_adjoint_forward(
     const dim3 blocks((g.size(2) + threads.x - 1) / threads.x,
                     (g.size(3) + threads.y - 1) / threads.y);
     const auto d = g.dim()-2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
-    AT_ASSERTM(v.size(1) == d, "vector field is of wrong dimension")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
+    TORCH_CHECK(v.size(1) == d, "vector field is of wrong dimension")
     auto out = at::zeros_like(g);
 
     if (d == 2) {
@@ -794,8 +794,8 @@ std::vector<at::Tensor> jacobian_times_vectorfield_adjoint_backward(
                     (v.size(3) + threads.y - 1) / threads.y);
 
     const auto d = v.dim()-2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
-    AT_ASSERTM(w.size(1) == d, "vector field is of wrong dimension")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional jacobian times vectorfield is supported")
+    TORCH_CHECK(w.size(1) == d, "vector field is of wrong dimension")
 
     at::Tensor d_v, d_w;
     if (need_v) d_v = at::zeros_like(v);

@@ -8,8 +8,8 @@
 #include "atomic.cuh"
 #include "interp.h"
 
-#define CHECK_CUDA(x) AT_ASSERTM(x.type().is_cuda(), #x " must be a CUDA tensor")
-#define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
+#define CHECK_CUDA(x) TORCH_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
+#define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
 #define INTERP_BACKWARD_THREADS_X 16
@@ -115,9 +115,9 @@ at::Tensor affine_interp_cuda_forward(
     at::Tensor I,
     at::Tensor A,
     at::Tensor T) {
-    AT_ASSERTM(A.size(0) == T.size(0), "A and T must have same first dimension")
+    TORCH_CHECK(A.size(0) == T.size(0), "A and T must have same first dimension")
     auto d = I.dim() - 2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported")
 
     const dim3 threads(16, 32);
     const dim3 blocks((I.size(2) + threads.x - 1) / threads.x,
@@ -543,10 +543,10 @@ std::vector<at::Tensor> affine_interp_cuda_backward(
     bool need_I,
     bool need_A,
     bool need_T) {
-    AT_ASSERTM(I.size(1) == grad_out.size(1), "I and grad_out must have same number of channels")
-    AT_ASSERTM(A.size(0) == T.size(0), "A and T must have same first dimension")
+    TORCH_CHECK(I.size(1) == grad_out.size(1), "I and grad_out must have same number of channels")
+    TORCH_CHECK(A.size(0) == T.size(0), "A and T must have same first dimension")
     auto d = I.dim() - 2;
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional affine interpolation is supported")
 
     // avoid allocating memory for gradients we don't need to compute
 	auto d_I = need_I ? at::zeros_like(I) : at::zeros({0}, I.type());
@@ -687,10 +687,10 @@ at::Tensor regrid_forward(
     std::vector<double> spacing) {
     auto d = I.dim() - 2;
     CHECK_INPUT(I)
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
-    AT_ASSERTM(shape.size() == d, "Shape should be vector of size d (not 2+d)")
-    AT_ASSERTM(origin.size() == d, "Origin should be vector of size d (not 2+d)")
-    AT_ASSERTM(spacing.size() == d, "Spacing should be vector of size d (not 2+d)")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
+    TORCH_CHECK(shape.size() == d, "Shape should be vector of size d (not 2+d)")
+    TORCH_CHECK(origin.size() == d, "Origin should be vector of size d (not 2+d)")
+    TORCH_CHECK(spacing.size() == d, "Spacing should be vector of size d (not 2+d)")
 
     const dim3 threads(32, 32);
     const dim3 blocks((shape[0] + threads.x - 1) / threads.x,
@@ -807,11 +807,11 @@ at::Tensor regrid_backward(
     std::vector<double> spacing) {
     auto d = grad_out.dim() - 2;
     CHECK_INPUT(grad_out)
-    AT_ASSERTM(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
-    AT_ASSERTM(inshape.size() == d, "Input shape should be vector of size d (not 2+d)")
-    AT_ASSERTM(shape.size() == d, "Shape should be vector of size d (not 2+d)")
-    AT_ASSERTM(origin.size() == d, "Origin should be vector of size d (not 2+d)")
-    AT_ASSERTM(spacing.size() == d, "Spacing should be vector of size d (not 2+d)")
+    TORCH_CHECK(d == 2 || d == 3, "Only two- and three-dimensional regridding is supported")
+    TORCH_CHECK(inshape.size() == d, "Input shape should be vector of size d (not 2+d)")
+    TORCH_CHECK(shape.size() == d, "Shape should be vector of size d (not 2+d)")
+    TORCH_CHECK(origin.size() == d, "Origin should be vector of size d (not 2+d)")
+    TORCH_CHECK(spacing.size() == d, "Spacing should be vector of size d (not 2+d)")
 
     const dim3 threads(32, 32);
     const dim3 blocks((shape[0] + threads.x - 1) / threads.x,

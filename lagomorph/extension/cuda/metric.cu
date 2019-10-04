@@ -314,9 +314,9 @@ void fluid_operator_cuda(
     double beta,
     double gamma) {
     auto dim = Fmv.dim() - 3;
-    AT_ASSERTM(dim == 2 || dim == 3, "Only two- and three-dimensional fluid metric is supported")
-    AT_ASSERTM(Fmv.size(1) == dim, "Vector field has incorrect shape for dimension")
-    AT_ASSERTM(Fmv.type() == cosluts[0].type(), "Type of LUTs must equal that of image")
+    TORCH_CHECK(dim == 2 || dim == 3, "Only two- and three-dimensional fluid metric is supported")
+    TORCH_CHECK(Fmv.size(1) == dim, "Vector field has incorrect shape for dimension")
+    TORCH_CHECK(Fmv.type() == cosluts[0].type(), "Type of LUTs must equal that of image")
 
     const dim3 threads(16, 32);
     const dim3 blocks((Fmv.size(2) + threads.x - 1) / threads.x,
