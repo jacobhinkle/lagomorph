@@ -1,0 +1,7 @@
+h5py
+numpy
+pandas
+pytest-runner
+setuptools_scm
+torch>=1.0
+tqdm
