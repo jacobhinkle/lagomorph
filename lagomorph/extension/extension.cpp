@@ -8,14 +8,14 @@
 #define CHECK_CUDA(x) TORCH_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
-bool check_contiguous(std::vector<at::Tensor> tens) {
+bool check_contiguous(std::vector<torch::Tensor> tens) {
     for (const auto& x : tens) {
         if (!x.is_contiguous())
             return false;
     }
     return true;
 }
-bool check_inputs(std::vector<at::Tensor> tens) {
+bool check_inputs(std::vector<torch::Tensor> tens) {
     for (const auto& x : tens) {
         if (!x.is_contiguous() || !x.is_cuda())
             return false;
@@ -26,77 +26,77 @@ bool check_inputs(std::vector<at::Tensor> tens) {
 bool lagomorph_debug_mode = false;
 
 // forward declarations of CPU entrypoints
-at::Tensor affine_interp_cpu_forward(
-    at::Tensor I,
-    at::Tensor A,
-    at::Tensor T);
+torch::Tensor affine_interp_cpu_forward(
+    torch::Tensor I,
+    torch::Tensor A,
+    torch::Tensor T);
 
 // forward declarations of cuda entrypoints
-at::Tensor interp_cuda_forward(
-    at::Tensor Iv,
-    at::Tensor u,
+torch::Tensor interp_cuda_forward(
+    torch::Tensor Iv,
+    torch::Tensor u,
     double dt);
-std::vector<at::Tensor> interp_cuda_backward(
-    at::Tensor grad_out,
-    at::Tensor Iv,
-    at::Tensor u,
+std::vector<torch::Tensor> interp_cuda_backward(
+    torch::Tensor grad_out,
+    torch::Tensor Iv,
+    torch::Tensor u,
     double dt,
     bool need_I,
     bool need_u);
-at::Tensor interp_hessian_diagonal_image(
-    at::Tensor Iv,
-    at::Tensor u,
+torch::Tensor interp_hessian_diagonal_image(
+    torch::Tensor Iv,
+    torch::Tensor u,
     double dt);
-at::Tensor affine_interp_cuda_forward(
-    at::Tensor I,
-    at::Tensor A,
-    at::Tensor T);
-std::vector<at::Tensor> affine_interp_cuda_backward(
-    at::Tensor grad_out,
-    at::Tensor I,
-    at::Tensor A,
-    at::Tensor T,
+torch::Tensor affine_interp_cuda_forward(
+    torch::Tensor I,
+    torch::Tensor A,
+    torch::Tensor T);
+std::vector<torch::Tensor> affine_interp_cuda_backward(
+    torch::Tensor grad_out,
+    torch::Tensor I,
+    torch::Tensor A,
+    torch::Tensor T,
     bool need_I,
     bool need_A,
     bool need_T);
-at::Tensor regrid_forward(
-    at::Tensor I,
+torch::Tensor regrid_forward(
+    torch::Tensor I,
     std::vector<int> shape,
     std::vector<double> origin,
     std::vector<double> spacing);
-at::Tensor regrid_backward(
-    at::Tensor grad_out,
+torch::Tensor regrid_backward(
+    torch::Tensor grad_out,
     std::vector<int> inshape,
     std::vector<int> shape,
     std::vector<double> origin,
     std::vector<double> spacing);
-at::Tensor jacobian_times_vectorfield_forward(
-    at::Tensor g,
-    at::Tensor v,
+torch::Tensor jacobian_times_vectorfield_forward(
+    torch::Tensor g,
+    torch::Tensor v,
     bool displacement,
     bool transpose);
-std::vector<at::Tensor> jacobian_times_vectorfield_backward(
-    at::Tensor grad_out,
-    at::Tensor v,
-    at::Tensor w,
+std::vector<torch::Tensor> jacobian_times_vectorfield_backward(
+    torch::Tensor grad_out,
+    torch::Tensor v,
+    torch::Tensor w,
     bool displacement,
     bool transpose,
     bool need_v,
     bool need_w);
-at::Tensor jacobian_times_vectorfield_adjoint_forward(
-    at::Tensor g,
-    at::Tensor v);
-std::vector<at::Tensor> jacobian_times_vectorfield_adjoint_backward(
-    at::Tensor grad_out,
-    at::Tensor v,
-    at::Tensor w,
+torch::Tensor jacobian_times_vectorfield_adjoint_forward(
+    torch::Tensor g,
+    torch::Tensor v);
+std::vector<torch::Tensor> jacobian_times_vectorfield_adjoint_backward(
+    torch::Tensor grad_out,
+    torch::Tensor v,
+    torch::Tensor w,
     bool need_v,
     bool need_w);
 void fluid_operator_cuda(
-    at::Tensor Fmv,
+    torch::Tensor Fmv,
     bool inverse,
-    std::vector<at::Tensor> coslut,
-    std::vector<at::Tensor> sinlut,
+    std::vector<torch::Tensor> coslut,
+    std::vector<torch::Tensor> sinlut,
     double alpha,
     double beta,
     double gamma);
@@ -106,10 +106,10 @@ void set_debug_mode(bool mode) {
     lagomorph_debug_mode = mode;
 }
 
-at::Tensor affine_interp_forward(
-        at::Tensor I,
-        at::Tensor A,
-        at::Tensor T) {
+torch::Tensor affine_interp_forward(
+        torch::Tensor I,
+        torch::Tensor A,
+        torch::Tensor T) {
     check_contiguous({I, A, T});
     if (I.is_cuda())
         return affine_interp_cuda_forward(I, A, T);
@@ -117,11 +117,11 @@ at::Tensor affine_interp_forward(
         return affine_interp_cpu_forward(I, A, T);
 }
 
-std::vector<at::Tensor> affine_interp_backward(
-        at::Tensor grad_out,
-        at::Tensor I,
-        at::Tensor A,
-        at::Tensor T,
+std::vector<torch::Tensor> affine_interp_backward(
+        torch::Tensor grad_out,
+        torch::Tensor I,
+        torch::Tensor A,
+        torch::Tensor T,
         bool need_I,
         bool need_A,
         bool need_T) {
@@ -132,9 +132,9 @@ std::vector<at::Tensor> affine_interp_backward(
     return affine_interp_cuda_backward(grad_out, I, A, T, need_I, need_A, need_T);
 }
 
-at::Tensor interp_forward(
-        at::Tensor Iv,
-        at::Tensor u,
+torch::Tensor interp_forward(
+        torch::Tensor Iv,
+        torch::Tensor u,
         double dt=1.0) {
     CHECK_INPUT(Iv);
     CHECK_INPUT(u);
@@ -142,10 +142,10 @@ at::Tensor interp_forward(
     return interp_cuda_forward(Iv, u, dt);
 }
 
-std::vector<at::Tensor> interp_backward(
-        at::Tensor grad_out,
-        at::Tensor I,
-        at::Tensor u,
+std::vector<torch::Tensor> interp_backward(
+        torch::Tensor grad_out,
+        torch::Tensor I,
+        torch::Tensor u,
         double dt,
         bool need_I,
         bool need_u) {
@@ -156,10 +156,10 @@ std::vector<at::Tensor> interp_backward(
 }
 
 void fluid_operator(
-    at::Tensor Fmv,
+    torch::Tensor Fmv,
     const bool inverse,
-    const std::vector<at::Tensor> cosluts,
-    const std::vector<at::Tensor> sinluts,
+    const std::vector<torch::Tensor> cosluts,
+    const std::vector<torch::Tensor> sinluts,
     const double alpha,
     const double beta,
     const double gamma) {

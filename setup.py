@@ -1,5 +1,6 @@
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+import os
 
 setup(
     name="lagomorph",
@@ -11,7 +12,7 @@ setup(
     python_requires=">=3.6",
     use_scm_version=True,
     setup_requires=['pytest-runner','setuptools_scm'],
-    install_requires=['torch>=1.0','numpy'],
+    install_requires=['torch>=1.0','numpy','h5py'],
     tests_require=['pytest'],
     cmdclass={'build_ext': BuildExtension},
     entry_points={'console_scripts':['lagomorph=lagomorph.__main__:main']},
@@ -23,5 +24,5 @@ setup(
             'lagomorph/extension/cuda/metric.cu',
             'lagomorph/extension/extension.cpp'
         ],
-        include_dirs=["lagomorph/extension/include"])]
+        include_dirs=[os.path.abspath("lagomorph/extension/include")])]
 )
