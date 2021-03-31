@@ -440,9 +440,11 @@ class _Tool(Tool):
         args = parser.parse_args(sys.argv[2:])
         self._initialize_compute(args)
 
-        from .data import H5Dataset, load_dataset
+        from .data import H5Dataset, IndexedDataset, load_dataset
         dataset = load_dataset(args.input, key=args.h5key,
                 force_dim=args.force_dim)
+        # equivalent to older return_indices=True behavior
+        dataset = IndexedDataset(dataset)
 
         if args.data_inmemory:
             pinned = []
