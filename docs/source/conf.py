@@ -95,3 +95,5 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "builtins": ("https://docs.python.org/3", None),
 }
+
+master_doc = "index"
