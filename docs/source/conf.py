@@ -15,7 +15,10 @@ from setuptools_scm import get_version
 import os
 import sys
 
+# added to find main lagomorph modules
 sys.path.insert(0, os.path.abspath("../.."))
+# this holds a dummy extension file that we use to avoid building on RTFD
+sys.path.insert(0, os.path.abspath("sphinxpypath"))
 
 
 # -- Project information -----------------------------------------------------

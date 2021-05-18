@@ -17,7 +17,5 @@ formats:
 python:
    version: 3.7
    install:
-     - method: setuptools
-       path: .
      - requirements: requirements.txt
      - requirements: docs/requirements.txt
