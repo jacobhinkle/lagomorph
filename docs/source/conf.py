@@ -14,17 +14,18 @@ from setuptools_scm import get_version
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../..'))
+
+sys.path.insert(0, os.path.abspath("../.."))
 
 
 # -- Project information -----------------------------------------------------
 
-project = 'lagomorph'
-copyright = '2021, Jacob Hinkle'
-author = 'Jacob Hinkle'
+project = "lagomorph"
+copyright = "2021, Jacob Hinkle"
+author = "Jacob Hinkle"
 
 # The full version, including alpha/beta/rc tags
-release = get_version(root='../..', relative_to=__file__)
+release = get_version(root="../..", relative_to=__file__)
 
 
 # -- General configuration ---------------------------------------------------
@@ -33,32 +34,37 @@ release = get_version(root='../..', relative_to=__file__)
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
-    'sphinx.ext.coverage',
-    'sphinx.ext.doctest',
-    'sphinx.ext.intersphinx',
-    'sphinx.ext.mathjax',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.todo',
-    'sphinx.ext.viewcode'
+    "sphinx_math_dollar",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.coverage",
+    "sphinx.ext.doctest",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.mathjax",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.todo",
+    "sphinx.ext.viewcode",
 ]
 
 mathjax3_config = {
-    'tex': {
-        'macros': {
+    "tex2jax": {"inlineMath": [["\\(", "\\)"]], "displayMath": [["\\[", "\\]"]]},
+    "tex": {
+        "macros": {
             "Ad": r"\operatorname{Ad}",
             "ad": r"\operatorname{ad}",
+            "Diff": r"\operatorname{Diff}",
             "div": r"\operatorname{div}",
+            "R": r"\mathbb{R}",
+            "sym": r"\operatorname{sym}",
         }
-   }
+    },
 }
 
-primary_domain = 'py'
-highlight_language = 'python'
+primary_domain = "py"
+highlight_language = "python"
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -71,21 +77,21 @@ exclude_patterns = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
+html_theme = "sphinx_rtd_theme"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ["_static"]
 
 nitpick_ignore = [
-        ('py:class', 'builtins.bool'),
-        ('py:class', 'builtins.float'),
-        ('py:class', 'builtins.int'),
-        ('py:class', 'builtins.str'),
-        ]
+    ("py:class", "builtins.bool"),
+    ("py:class", "builtins.float"),
+    ("py:class", "builtins.int"),
+    ("py:class", "builtins.str"),
+]
 
 intersphinx_mapping = {
-        'python': ('https://docs.python.org/3', None),
-        'builtins': ('https://docs.python.org/3', None),
+    "python": ("https://docs.python.org/3", None),
+    "builtins": ("https://docs.python.org/3", None),
 }

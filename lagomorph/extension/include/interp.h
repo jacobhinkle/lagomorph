@@ -185,7 +185,7 @@ biLerp_grad(Real& Ix, Real& gx, Real& gy,
     //       v2 * t       * u       +
     //       v3 * (1 - t) * u
     //
-    // The derivative is 
+    // The derivative is
     //    dh/dx = (-v0) * (1 - u) +
     //              v1  * (1 - u) +
     //              v2  * u       +
@@ -278,7 +278,7 @@ triLerp_grad(Real& Ix, Real& gx, Real& gy, Real& gz,
     //       v5 * t       * (1 - u) * v       +
     //       v6 * t       * u       * v       +
     //       v7 * (1 - t) * u       * v
-    // The derivative is 
+    // The derivative is
     //    dh/dx = (-v0) * (1 - u) * (1 - v) +
     //              v1  * (1 - u) * (1 - v) +
     //              v2  * u       * (1 - v) +

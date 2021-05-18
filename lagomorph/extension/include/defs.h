@@ -44,5 +44,5 @@ extern bool lagomorph_debug_mode;
 #ifdef __CUDACC__
 #define DEVICE __device__
 #else
-#define DEVICE 
+#define DEVICE
 #endif

@@ -1,6 +1,7 @@
 h5py
 numpy
 pandas
+pre-commit
 pytest-runner
 setuptools_scm
 torch>=1.0
