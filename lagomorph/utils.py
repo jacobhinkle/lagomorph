@@ -4,28 +4,31 @@ import argparse, sys, os
 # from https://github.com/slundberg/shap/issues/121
 IN_IPYNB = None
 
-def in_ipynb():
-  global IN_IPYNB
-  if IN_IPYNB is not None:
-    return IN_IPYNB
 
-  try:
-    cfg = get_ipython().config
-    if type(get_ipython()).__module__.startswith("ipykernel."):
-    # if cfg['IPKernelApp']['parent_appname'] == 'ipython-notebook':
-      # print ('Running in ipython notebook env.')
-      IN_IPYNB = True
-      return True
-    else:
-      return False
-  except NameError:
-    # print ('NOT Running in ipython notebook env.')
-    return False
+def in_ipynb():
+    global IN_IPYNB
+    if IN_IPYNB is not None:
+        return IN_IPYNB
+
+    try:
+        cfg = get_ipython().config
+        if type(get_ipython()).__module__.startswith("ipykernel."):
+            # if cfg['IPKernelApp']['parent_appname'] == 'ipython-notebook':
+            # print ('Running in ipython notebook env.')
+            IN_IPYNB = True
+            return True
+        else:
+            return False
+    except NameError:
+        # print ('NOT Running in ipython notebook env.')
+        return False
+
 
 if in_ipynb():
     from tqdm import tqdm_notebook as tqdm
 else:
     from tqdm import tqdm
+
 
 def mpi_size():
     try:
@@ -34,12 +37,14 @@ def mpi_size():
         return 1
     return MPI.COMM_WORLD.Get_size()
 
+
 def mpi_rank():
     try:
         from mpi4py import MPI
     except ImportError:
         return 0
     return MPI.COMM_WORLD.Get_rank()
+
 
 def mpi_local_comm():
     """Split MPI communicator based on shmem capability to produce a node-local
@@ -48,7 +53,9 @@ def mpi_local_comm():
     Requires MPI implementation version >= 3
     """
     from mpi4py import MPI
+
     return MPI.COMM_WORLD.Split_type(MPI.COMM_TYPE_SHARED)
+
 
 def mpi_local_rank():
     """Computes the local rank using an MPI split communicator with type shmem.
@@ -68,46 +75,60 @@ def mpi_local_rank():
         print("Local rank computation not yet implemented for MPI < 3")
         return NotImplemented
 
+
 class Tool:
     # Customized from:
     # https://chase-seibert.github.io/blog/2014/03/21/python-multilevel-argparse.html#
     module_name = None
     subcommands = []
+
     def __init__(self):
-        usage = f"python -m {self.module_name} <command> [<args>]" \
+        usage = (
+            f"python -m {self.module_name} <command> [<args>]"
             + "\n\nAvailable subcommands:\n\n"
+        )
         for c in self.subcommands:
             usage += f"{c:15s} {self.describe_subcommand(c)}\n"
         usage += "\n"
         self.parser = self.new_parser(usage=usage)
-        self.parser.add_argument("command", help='Subcommand to run')
+        self.parser.add_argument("command", help="Subcommand to run")
+
     def run(self, argv=None):
         if argv is None:
             argv = sys.argv
         args = self.parser.parse_args(sys.argv[1:2])
         if args.command not in self.subcommands:
-            print('ERROR: Unrecognized command')
+            print("ERROR: Unrecognized command")
             self.parser.print_help()
             sys.exit(1)
         self.call_subcommand(args.command)
+
     def describe_subcommand(self, sub):
         return getattr(self, sub).__doc__
+
     def new_parser(self, subcmd=None, **kwargs):
-        prog = 'python -m ' + self.module_name
+        prog = "python -m " + self.module_name
         if subcmd is not None:
-            prog += ' ' + subcmd
+            prog += " " + subcmd
         return argparse.ArgumentParser(
-                prog=prog,
-                formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                **kwargs)
+            prog=prog, formatter_class=argparse.ArgumentDefaultsHelpFormatter, **kwargs
+        )
+
     def call_subcommand(self, command):
         # use dispatch pattern to invoke method with same name
         getattr(self, command)()
+
     @staticmethod
     def _compute_args(parser):
         """Add common arguments for parallel commands"""
-        group = parser.add_argument_group('compute parameters')
-        group.add_argument('--gpu', default="local_rank", type=str, help='GPU to use, None for CPU, "local_rank" to use local MPI rank')
+        group = parser.add_argument_group("compute parameters")
+        group.add_argument(
+            "--gpu",
+            default="local_rank",
+            type=str,
+            help='GPU to use, None for CPU, "local_rank" to use local MPI rank',
+        )
+
     def _initialize_compute(self, args):
         """Use common compute_args to initialize torch and NCCL"""
         self.rank = mpi_rank()
@@ -115,7 +136,7 @@ class Tool:
         self.local_rank = mpi_local_rank()
 
         self.gpu = args.gpu
-        if self.gpu == 'local_rank':
+        if self.gpu == "local_rank":
             self.gpu = self.local_rank
         else:
             self.gpu = int(self.gpu)
@@ -123,23 +144,30 @@ class Tool:
         torch.cuda.set_device(self.gpu)
 
         self._initialize_torch()
+
     def _initialize_torch(self):
         if self.world_size > 1:
             # check that environment is set properly. If not, fill in with
             # default values
-            if 'MASTER_ADDR' not in os.environ:
+            if "MASTER_ADDR" not in os.environ:
                 # Get the address of the first node in the communicator
                 from mpi4py import MPI
+
                 nodename = MPI.Get_processor_name()
                 nodelist = MPI.COMM_WORLD.allgather(nodename)
-                os.environ['MASTER_ADDR'] = nodelist[0]
-            if 'MASTER_PORT' not in os.environ:
-                os.environ['MASTER_PORT'] = '1234'
-            torch.distributed.init_process_group(backend='nccl',
-                    world_size=self.world_size, rank=self.rank,
-                    init_method='env://')
+                os.environ["MASTER_ADDR"] = nodelist[0]
+            if "MASTER_PORT" not in os.environ:
+                os.environ["MASTER_PORT"] = "1234"
+            torch.distributed.init_process_group(
+                backend="nccl",
+                world_size=self.world_size,
+                rank=self.rank,
+                init_method="env://",
+            )
+
     def _stamp_dataset(self, ds, args):
         from .version import __version__
         import json
-        ds.attrs['lagomorph_version'] = __version__
-        ds.attrs['command_args'] = json.dumps(vars(args))
+
+        ds.attrs["lagomorph_version"] = __version__
+        ds.attrs["command_args"] = json.dumps(vars(args))

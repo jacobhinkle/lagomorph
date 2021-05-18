@@ -1,5 +1,6 @@
 import torch
 
+
 def catch_gradcheck(message, *args):
     check = False
     try:

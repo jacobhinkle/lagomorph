@@ -5,6 +5,7 @@ import numpy as np
 from .diff import jacobian_times_vectorfield, jacobian_times_vectorfield_adjoint
 from .deform import interp
 
+
 def ad(v, w):
     r"""
     This is :math:`\ad(v,w)`, the adjoint action of a velocity `v` on a
@@ -13,8 +14,10 @@ def ad(v, w):
     .. math:: \ad(v,w) = -[v,w] = Dv w - Dw v
         :label: advw
     """
-    return jacobian_times_vectorfield(v, w, displacement=False) \
-            - jacobian_times_vectorfield(w, v, displacement=False)
+    return jacobian_times_vectorfield(
+        v, w, displacement=False
+    ) - jacobian_times_vectorfield(w, v, displacement=False)
+
 
 def Ad(phi, v):
     r"""
@@ -30,9 +33,10 @@ def Ad(phi, v):
     Given :math:`\varphi^{-1}`, :math:`\Ad(\varphi, v)` can be computed by first multiplying :math:`v` by
     :math:`D\varphi^{-1}` then splatting the components of the resulting vector field.
     """
-    #DphiTv = jacobian_times_vectorfield_adjoint(phi, v, displacement=True)
-    #return splat(DphiTv, phi)
+    # DphiTv = jacobian_times_vectorfield_adjoint(phi, v, displacement=True)
+    # return splat(DphiTv, phi)
     raise NotImplementedError
+
 
 def ad_star(v, m):
     r"""
@@ -46,8 +50,10 @@ def ad_star(v, m):
     Note that this is the numerical adjoint of :math:`ad(v,.)` in :eq:`advw`,
     which is implemented using a central finite difference scheme.
     """
-    return jacobian_times_vectorfield(v, m, displacement=False, transpose=True) \
-         - jacobian_times_vectorfield_adjoint(m, v)
+    return jacobian_times_vectorfield(
+        v, m, displacement=False, transpose=True
+    ) - jacobian_times_vectorfield_adjoint(m, v)
+
 
 def Ad_star(phiinv, m):
     r"""
@@ -61,18 +67,26 @@ def Ad_star(phiinv, m):
     """
     mphiinv = interp(m, phiinv)
     return jacobian_times_vectorfield(phiinv, mphiinv, displacement=True)
+
+
 # dagger versions of the above coadjoint operators
 # The dagger indicates that instead of a _dual_ action, the _adjoint_ action
 # under a metric. These are performed by flatting, applying to dual action,
 # then sharping.
 def ad_dagger(x, y, metric):
     return metric.sharp(ad_star(x, metric.flat(y)))
+
+
 def Ad_dagger(phi, y, metric):
     return metric.sharp(Ad_star(phi, metric.flat(y)))
+
+
 # The sym operator is a negative symmetrized ad_dagger, and is important for
 # computing reduced Jacobi fields.
 # cf. Bullo 1995 or Hinkle 2015 (PhD thesis)
 def sym(x, y, metric):
     return -(ad_dagger(x, y, metric) + ad_dagger(y, x, metric))
+
+
 def sym_dagger(x, y, metric):
     return ad_dagger(y, x, metric) - ad(x, y)
